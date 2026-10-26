@@ -39,6 +39,7 @@ static uint64_t g_gen_shown;            // interpolated frames handed to the scr
 #include "nvn_fbread.h"
 #include "nvn_refl.h"
 #include "nvn_texture_plan.h"
+#include "nvn_level_exact.h"   // nvn_msl_level_exact: sampled textures read by texel position (TOTK #337)
 #include "fps_overlay.h"
 #include "nvn_cover.h"
 #include "totk_shader_scope.h"   // totk_shader_scope_contains: the warm-up scope (PR #84)
@@ -2434,6 +2435,7 @@ static id<MTLTexture> stor_recreate(const stor_key *k, MTLTextureUsage usage);
    pkg_evict_sweep, reup_retire). As an id return each call was a retain + autorelease in here and a claim in the caller. */
 static void *tex_mtl_p(const tex_t *ct);
 #define tex_mtl(t) ((__bridge id<MTLTexture>)tex_mtl_p(t))
+static void pkg_keep_levels(const tex_t *t, int gpu_op);
 static int rp_active(void);
 /* TOTK: plain pointers for the replay hot paths. The functions above return id, and the __unsafe_unretained on their
    return types is ignored by ARC, so every lookup was a retain / autorelease pair. Table entries are only freed through
@@ -2458,6 +2460,11 @@ static void pkg_owned_locked(uint64_t k);
 static void gpu_owned_mark(uint64_t k) { pthread_mutex_lock(&g_smu); int had = totk_serial_has(&g_gpu_owned, k); if (!had) { totk_serial_add(&g_gpu_owned, k); atomic_fetch_add(&g_owned_gen, 1); pkg_owned_locked(k); } pthread_mutex_unlock(&g_smu);
 }
 static int gpu_owned(uint64_t k) { pthread_mutex_lock(&g_smu); int d = totk_serial_has(&g_gpu_owned, k); pthread_mutex_unlock(&g_smu); return d; }
+/* TOTK (#337): serials a shader reads by texel position or at an exact level (tex_keep_levels): their CPU-pool copies keep
+   every level (mip_drop_of). Kept per serial, as g_gpu_owned, so a copy made again later (eviction, purge, a finalised
+   serial a replay meets) is made at full size too. Entries are dropped with the serial (serial_forget_locked_rmu). */
+static totk_serial_set g_keep_levels;
+static int keep_levels_has(uint64_t k) { pthread_mutex_lock(&g_smu); int d = totk_serial_has(&g_keep_levels, k); pthread_mutex_unlock(&g_smu); return d; }
 
 static uint64_t *g_dead_put; static int g_dead_put_n, g_dead_put_cap; static uint64_t g_dead_put_total;
 static int serial_is_dead(uint64_t k) { pthread_mutex_lock(&g_smu); int d = totk_serial_has(&g_dead_serial, k); pthread_mutex_unlock(&g_smu); return d; }
@@ -2480,6 +2487,7 @@ static void serial_forget_locked_rmu(uint64_t k) {   /* g_rmu held (g_rmu -> g_p
     pthread_mutex_lock(&g_smu);
     if (totk_serial_del(&g_dead_serial, k)) g_serial_forgotten++;
     totk_serial_del(&g_gpu_owned, k);
+    totk_serial_del(&g_keep_levels, k);
     pthread_mutex_unlock(&g_smu);
 }
 static inline int registry_lock(void); static inline void registry_unlock(void);
@@ -2558,7 +2566,7 @@ static int pkg_final_cache_on(void) {
     if (v < 0) { const char *e = getenv("TOTK_PKG_FINAL_CACHE"); v = !(e && !atoi(e)); atomic_store(&g_pkg_final_cache, v); }
     return v;
 }
-@interface NvPkg : NSObject { @public id<MTLTexture> tex; uint64_t stamp, seen, hash, owned_gen; int tracked, owned, hashed, vol, lost; reup_key key; uint64_t chash, csub, used; uintptr_t lo, hi; uint8_t *edge; uint32_t eh, et; int edge_want; BOTW_PKG_FIELDS } @end   // lo / hi (TOTK): the texture's memory (pkg_orphan_report)   // tracked (TOTK): result of the last nvn_dirty_tracked   // hash：DM_NVN_DIRTYCHECK 时上传内容的全量哈希 | hash: full hash of the uploaded content under DM_NVN_DIRTYCHECK
+@interface NvPkg : NSObject { @public id<MTLTexture> tex; uint64_t stamp, seen, hash, owned_gen; int tracked, owned, hashed, vol, lost, keep, gpu_wrote; reup_key key; uint64_t chash, csub, used; uintptr_t lo, hi; uint8_t *edge; uint32_t eh, et; int edge_want; BOTW_PKG_FIELDS } @end   // lo / hi (TOTK): the texture's memory (pkg_orphan_report)   // tracked (TOTK): result of the last nvn_dirty_tracked   // keep (TOTK #337): the serial is in g_keep_levels, every upload keeps all levels (mip_drop_of)   // gpu_wrote (TOTK): a GPU copy, clear or image store wrote the copy since its last upload (pkg_note_gpu_write)   // hash：DM_NVN_DIRTYCHECK 时上传内容的全量哈希 | hash: full hash of the uploaded content under DM_NVN_DIRTYCHECK
 /* TOTK: a mirrored texture the GPU starts rendering into is told directly (g_smu held), so tex_mtl no longer asks the owned
    set again every time any other serial joins it (a locked lookup per CPU-pool texture per new render target). */
 static void pkg_owned_locked(uint64_t k) {
@@ -2566,6 +2574,17 @@ static void pkg_owned_locked(uint64_t k) {
     NvPkg *pk = (NvPkg *)o; pk->owned = 1;
     // a purgeable copy (pkg_purge_idle) the GPU now renders into must keep its memory; tex_mtl uploads it again if the system took it
     if (pk->vol && pk->tex) { pk->vol = 0; if ([pk->tex setPurgeableState:MTLPurgeableStateNonVolatile] == MTLPurgeableStateEmpty) pk->lost = 1; }
+}
+/* TOTK (#337): the serial joins g_keep_levels; an NvPkg it already has keeps all levels from its next upload. Returns 1
+   when the serial joined now, *had_copy = it already has an NvPkg. Caller holds g_rmu (g_rmu -> g_smu). */
+static int pkg_keep_mark(uint64_t k, int *had_copy) {
+    pthread_mutex_lock(&g_smu);
+    int fresh = totk_serial_add(&g_keep_levels, k);
+    __unsafe_unretained id o = hm_get_id(&g_by_serial, &k); int had = [o isKindOfClass:[NvPkg class]];   // held by the serial table under g_smu
+    if (had) ((NvPkg *)o)->keep = 1;
+    pthread_mutex_unlock(&g_smu);
+    *had_copy = had;
+    return fresh;
 }
 @implementation NvPkg
 - (void)dealloc {
@@ -3690,26 +3709,31 @@ static id<MTLTexture> reup_take(const reup_key *k) {
 }
 /* TOTK (iPhone): Metal copies of large mipmapped CPU-pool textures leave out the top level: a quarter of the memory. The
    game samples them with normalised coordinates, so a texture one level smaller is drawn from what was its level 1 (on
-   the 720p handheld screen most of them are minified anyway). Texture-ID views shift their level range (tex_by_id);
-   a copy the GPU starts rendering into is uploaded again at full size (tex_mtl). 2D / 2D-array / cube textures with
-   at least two levels and both sides >= TOTK_MIP_DROP_MIN (512). Not lower: at 256 the grass disappeared and the ground
-   took wrong colours on an iPhone 14 (2026-10-23): data textures of that size (terrain material / grass maps) are read
-   by integer texel coordinates, which a copy one level smaller does not match. TOTK_MIP_DROP=0 off, =1 on (default on
-   iOS only). */
+   the 720p handheld screen most of them are minified anyway). Texture-ID views shift their level range (tex_by_id).
+   2D / 2D-array / cube textures with at least two levels and both sides >= TOTK_MIP_DROP_MIN (512). Not lower: at 256
+   the grass disappeared and the ground took wrong colours on an iPhone 14 (2026-10-23). A copy one level smaller is
+   wrong wherever a level or texel is named by number, so these textures keep all levels (pk->keep, pkg_keep_levels,
+   #337): render targets before their first pass (attachment_texture), GPU copies and clears, and the shader slots of
+   refl_mark_level_exact (TOTK_MIP_KEEP). TOTK_MIP_DROP=0 off, =1 on (default on iOS only). */
 static uint64_t g_mip_dropped;
-static unsigned mip_drop_of(const tex_t *t) {
-    static int on = -1; static unsigned minside;
-    if (on < 0) { const char *e = getenv("TOTK_MIP_DROP"), *m = getenv("TOTK_MIP_DROP_MIN"); on = e ? atoi(e) != 0 : TARGET_OS_IPHONE; minside = m ? (unsigned)atoi(m) : 512;
-        if (on) MLOG("大贴图副本少传最高一级 mip：开（两边都 ≥%u 的 2D / 数组 / 立方体贴图；TOTK_MIP_DROP=0 关）", minside); }
-    if (!on || g_mip_nodrop) return 0;
+static unsigned g_mip_drop_min;
+static int mip_drop_on(void) {   // also asked by shader_load on the warm-up threads
+    static int on; static dispatch_once_t once;
+    dispatch_once(&once, ^{ const char *e = getenv("TOTK_MIP_DROP"), *m = getenv("TOTK_MIP_DROP_MIN"); g_mip_drop_min = m ? (unsigned)atoi(m) : 512; on = e ? atoi(e) != 0 : TARGET_OS_IPHONE;
+        if (on) MLOG("大贴图副本少传最高一级 mip：开（两边都 ≥%u 的 2D / 数组 / 立方体贴图；TOTK_MIP_DROP=0 关）", g_mip_drop_min); });
+    return on;
+}
+/* pk: the copy's record (NULL: whether this texture's copies are reduced at all, without its keep mark). */
+static unsigned mip_drop_of(const tex_t *t, NvPkg *pk) {
+    if (!mip_drop_on() || g_mip_nodrop || (pk && pk->keep)) return 0;
     uint32_t g = t->d.target;
-    if (!(g == 1 || g == 4 || g == 7 || g == 8 || g == 9) || t->d.levels < 2 || t->d.width < minside || t->d.height < minside) return 0;
+    if (!(g == 1 || g == 4 || g == 7 || g == 8 || g == 9) || t->d.levels < 2 || t->d.width < g_mip_drop_min || t->d.height < g_mip_drop_min) return 0;
     return 1;
 }
 static id<MTLTexture> pkg_upload_(const tex_t *t, uint64_t *stamp, reup_key *key, NvPkg *pk) {
     MTLTextureDescriptor *d = tex_desc(t, t->has_layout);   // TOTK: default-layout mirrored textures keep render-target usage
     if (!d) return nil;
-    unsigned drop = mip_drop_of(t);   // TOTK (iPhone): the copy starts at the game's level `drop` (see mip_drop_of)
+    unsigned drop = mip_drop_of(t, pk);   // TOTK (iPhone): the copy starts at the game's level `drop` (see mip_drop_of)
     if (drop) { g_mip_dropped++; if (g_mip_dropped == 1 || g_mip_dropped % 2000 == 0) MLOG("大贴图副本少传最高一级：累计 %llu 张（例 %ux%u 格式 %#x %u 级）", (unsigned long long)g_mip_dropped, t->d.width, t->d.height, t->d.format, t->d.levels); }
     if (drop) { d.width = MAX(d.width >> drop, 1u); d.height = MAX(d.height >> drop, 1u); d.mipmapLevelCount -= drop; }
     *key = reup_key_of(d);
@@ -3902,11 +3926,15 @@ static void *tex_mtl_p(const tex_t *ct) {
         if (pk && (pk->vol || pk->lost)) pkg_unpurge(pk);   // TOTK (iPhone): a copy marked purgeable while idle (pkg_purge_idle)
         /* TOTK: rendered into by the GPU since the upload: the pool memory is stale, never re-upload. The set only grows, so
            the answer is kept in the NvPkg and asked again only after it gained members (a locked lookup on every use before). */
-        int reduced = pk && pk->tex && (pk->tex.mipmapLevelCount < (t->d.levels ? t->d.levels : 1u) || (tc_pf(t->d.format) != MTLPixelFormatInvalid && pk->tex.pixelFormat == tc_pf(t->d.format)));   // TOTK: copy without its top level (mip_drop_of) or transcoded (tex_tc): not something the GPU can render into
+        int short_levels = pk && pk->tex && pk->tex.mipmapLevelCount < (t->d.levels ? t->d.levels : 1u);   // TOTK: copy without its top level (mip_drop_of)
+        int reduced = short_levels || (pk && pk->tex && tc_pf(t->d.format) != MTLPixelFormatInvalid && pk->tex.pixelFormat == tc_pf(t->d.format));   // ... or transcoded (tex_tc): not something the GPU can render into
         if (pk && pk->owned && pk->tex && !reduced) return (__bridge void *)pk->tex; BOTW_PKG_RENDER_ALIAS(pk, t)
         if (pk) {   // 已上传：自上次检查后有过客体写才查覆盖页 | Already uploaded: check the covered pages only if there has been a guest write since the last check
             uint64_t now = nvn_dirty_now(), h = 0; int clean;
-            if (!pk->tex || (pk->owned && reduced)) {   // TOTK: the copy was evicted, or the GPU renders into a reduced copy (needs full size); the copy was evicted under memory pressure (pkg_evict_sweep): upload it again from the pool bytes
+            /* TOTK: the copy was evicted under memory pressure (pkg_evict_sweep), the GPU renders into a reduced copy (needs
+               full size, decompressed), or a shader reads a copy without its top level by texel position (#337,
+               tex_keep_levels): upload it again from the pool bytes */
+            if (!pk->tex || (pk->owned && reduced) || (pk->keep && short_levels)) {
                 clean = 0; g_pkg_restored++;
                 if (pk->hashed) { pk->csub = g_sub_serial; h = pkg_hash(t->mem, t->L.size); }
             } else
@@ -3939,13 +3967,15 @@ static void *tex_mtl_p(const tex_t *ct) {
             }
             TILELOG(t, "re-upload from the pool bytes");
             uint64_t st; BOTW_PKG_WB_TAKE() reup_key nk; g_mip_nodrop = pk->owned; id<MTLTexture> nt = pkg_upload(t, &st, &nk, pk); g_mip_nodrop = 0;   // 池内容变了（流式素材写进同一存储）：换新贴图，在途绘制仍读旧的 | Pool content changed (streamed assets written into the same storage): switch to a new texture; in-flight draws still read the old one
-            if (nt) { id<MTLTexture> old = pk->tex; pk->tex = nt; reup_retire(old, &pk->key); pk->key = nk; if (pk->hashed) pk->chash = h; ser_bump(t->serial); pk->stamp = st; pk->seen = st; BOTW_PKG_WB_SET(pk) g_pkg_reuploads++; if (dirtycheck()) pk->hash = full_hash(t->mem, t->L.size); BOTW_REUP_TRACKED(pk, t) }
+            if (nt) { id<MTLTexture> old = pk->tex; pk->tex = nt; reup_retire(old, &pk->key); pk->key = nk; if (pk->hashed) pk->chash = h; ser_bump(t->serial); pk->stamp = st; pk->seen = st; pk->gpu_wrote = 0; BOTW_PKG_WB_SET(pk) g_pkg_reuploads++; if (dirtycheck()) pk->hash = full_hash(t->mem, t->L.size); BOTW_REUP_TRACKED(pk, t) }   // gpu_wrote: the copy holds the pool bytes again
             else { free(pk->edge); pk->edge = NULL; }   // TOTK (#90): the bytes kept belong to the upload that failed
             return (__bridge void *)pk->tex;
         }
         TILELOG(t, "first upload from the pool bytes");
         NvPkg *npk = [NvPkg new]; pk = npk;
         pk->lo = (uintptr_t)t->mem; pk->hi = pk->lo + t->L.size; BOTW_PKG_WB_SEEN(pk)
+        int droppable = mip_drop_of(t, NULL);   // TOTK (#337): a copy of this texture may leave out its top level
+        pk->keep = droppable && keep_levels_has(t->serial);   // a shader already read it by texel position (tex_keep_levels): upload every level
         pk->tex = pkg_upload(t, &pk->stamp, &pk->key, pk);
         if (!pk->tex) return NULL;
         /* TOTK (#90): seen = the upload's stamp, not "now": a write that faulted during the copy moved "now" on, and the
@@ -3953,6 +3983,7 @@ static void *tex_mtl_p(const tex_t *ct) {
         pk->seen = pk->stamp; g_pkg_uploads++; if (dirtycheck()) pk->hash = full_hash(t->mem, t->L.size);
         serial_put(t->serial, pk);
         pk->owned = gpu_owned(t->serial);   // after it is in the table: a later mark finds it there (pkg_owned_locked)
+        if (droppable && !pk->keep) pk->keep = keep_levels_has(t->serial);   // likewise for a keep mark (pkg_keep_mark) made meanwhile: the next use uploads it again
         if ((pk->hashed = pkg_hashed(t))) { pk->chash = pkg_hash(t->mem, t->L.size); pk->csub = g_sub_serial; }
         if (serial_is_dead(t->serial)) dead_put_note(t->serial); BOTW_PKG_RENDER_ALIAS(pk, t)
         return (__bridge void *)pk->tex;
@@ -4589,6 +4620,7 @@ static void blk_copy(id<MTLTexture> from, int from_aux, id<MTLTexture> to, const
 }
 // Returns the auxiliary render texture for attachment i (nil when the attachment renders directly) and fills *w.
 static id<MTLTexture> blk_aux(const tex_t *t, const view_t *v, int has_v, blk_wb *w) {
+    pkg_keep_levels(t, 1);   // TOTK (#337): a render target keeps all levels before its first pass (see attachment_texture)
     id<MTLTexture> base = tex_mtl(t);
     uint32_t upf; int ubpp; int decode = tex_astc(t) ? 2 : bc_unpack(t->d.format, &upf, &ubpp);   /* no BC on this GPU: base is decompressed (1) or ASTC (2) */
     if (!base || !(pf_block_compressed(base.pixelFormat) || decode)) return nil;
@@ -4700,6 +4732,10 @@ static MTLPixelFormat attachment_format(const tex_t *t, const view_t *v, int has
     return (MTLPixelFormat)pf;
 }
 static id<MTLTexture> attachment_texture(const tex_t *t, const view_t *v, int has_v) {
+    /* TOTK (#337): a CPU-pool texture keeps all levels before the GPU renders into it. It becomes owned (gpu_owned_mark)
+       only after its attachment is resolved, so the first pass rendered into a copy without its top level, at the game's
+       level number, and the next use uploaded the copy again at full size from the pool bytes, without that rendering. */
+    pkg_keep_levels(t, 1);
     __unsafe_unretained id<MTLTexture> b0 = BOTW_ATTACH_TEX_U(t); if (!b0) return nil;   // TOTK: held by the serial table (tex_mtl); the common answer takes no retain
     MTLPixelFormat bpf = b0.pixelFormat, pf = attachment_format(t, v, has_v, bpf);
     if (pf == bpf) return b0;
@@ -5121,6 +5157,7 @@ static void shmap_load(void) {
 @interface NvShader : NSObject { @public id<MTLFunction> fn; nvn_refl rf; id<MTLArgumentEncoder> ae; NSUInteger arg_len; int stage, range_ro, writes_depth, lay_ok; uint8_t drv_scanned[3];   /* drv_scanned (TOTK): driver segment c0 / c2 reads found by drv_scan in the MSL but missing from the reflection json */ /* lay_ok (TOTK): vertex MSL can write the layer (1) or not (-1), 0 = not checked yet; writes_depth (TOTK): the fragment function has a [[depth(...)]] output, so its pipeline needs a depth attachment */ const char *builtin; uint64_t logged; char key[80]; id<MTLBuffer> c1buf; uint64_t c1_gpu; size_t c1off;
     uint16_t texture_slots[NVN_REFL_MAXB]; uint8_t texture_count, texture_plan_ready;
     uint8_t guard_idx[NVN_REFL_MAXB], guard_count, guard_plan_ready;   // TOTK: the bindings upd_guard_stage looks at (storage / typed buffers), from the reflection once
+    uint64_t level_exact[3];   // TOTK (#337): texture slots (bit n: texture slot n, 128 + n: image slot n) whose texture keeps all its levels (refl_mark_level_exact)
     // 上次编好的参数缓冲
     // The argument buffer encoded last time
     arg_epoch_key ab_epoch; int ab_epoch_ok;
@@ -5509,6 +5546,39 @@ static void refl_mark_stores(NvShader *o, NSArray *bs, NSString *src) {
         if (msl_stores_through(src, d[@"msl_name"])) b->rw = 1;
     }
 }
+/* TOTK (#337): which textures keep all their levels although mip_drop_of would leave out the top one (iOS). On an iPhone
+   the Depths showed false Gloom with stair-stepped edges around Link, and at a 256 threshold the grass vanished: a copy
+   that answers with the game's level 1 at level 0 is wrong wherever a level or texel is named by number.
+   TOTK_MIP_KEEP=1 (default): render targets, GPU copies and clears (pkg_keep_levels), and of the shader slots
+   (refl_mark_level_exact) textures read by texel position, gathered or asked for their size (nvn_msl_level_exact),
+   images, and every texture a vertex or compute shader samples (those stages always sample at an explicit level, mostly
+   the game's level 0, which a reduced copy does not hold). =2 also textures a fragment shader samples at an explicit
+   level. =0 none, the behaviour before. */
+static int mip_keep_mode(void) {
+    static int mode; static dispatch_once_t once;
+    dispatch_once(&once, ^{ const char *e = getenv("TOTK_MIP_KEEP"); mode = e && *e ? atoi(e) : NVN_LEVEL_EXACT_TEXELS;
+        if (mode < NVN_LEVEL_EXACT_OFF || mode > NVN_LEVEL_EXACT_LEVELS) mode = NVN_LEVEL_EXACT_TEXELS;
+        MLOG("大贴图副本保留最高一级：%s（TOTK_MIP_KEEP=%d；1 = 渲染目标、GPU 拷贝 / 清除、按纹素位置读 / 取尺寸的贴图、图像、顶点与计算着色器采样的贴图，2 = 另加片元着色器按指定级采样的贴图，0 关）",
+             mode ? "开" : "关", mode); });
+    return mode;
+}
+static void refl_mark_level_exact(NvShader *o, NSArray *bs, NSString *src) {   // src: the full MSL, nil when only a library was loaded
+    int mode = mip_keep_mode(); if (!mode) return;
+    int named = [bs isKindOfClass:[NSArray class]] && (int)bs.count == o->rf.nb;   // nvn_refl_from_json keeps the json order 1:1
+    const char *s = named ? src.UTF8String : NULL;
+    for (int i = 0; i < o->rf.nb; i++) {
+        const nvn_rbind *b = &o->rf.b[i]; unsigned slot;
+        if (b->kind == NVN_RB_IMG && b->reg < 32) slot = 128u + b->reg;   // image loads and stores always name a texel
+        else if (b->kind == NVN_RB_TEX && b->reg < 128) {
+            slot = b->reg;
+            if (o->stage == 1) {   // fragment: only the accesses nvn_msl_level_exact finds (none without the MSL)
+                NSDictionary *d = s ? bs[(NSUInteger)i] : nil; NSString *name = [d isKindOfClass:[NSDictionary class]] ? d[@"msl_name"] : nil;
+                if (![name isKindOfClass:[NSString class]] || !nvn_msl_level_exact(s, name.UTF8String, mode)) continue;
+            }
+        } else continue;
+        o->level_exact[slot >> 6] |= UINT64_C(1) << (slot & 63);
+    }
+}
 static int drv_scan(NvShader *o, NSString *src) {   // src: the full MSL (iOS does not keep it in o->src)
     const char *s = src.UTF8String; if (!s) return 0;
     int nunfill = 0;
@@ -5589,6 +5659,7 @@ static NvShader *shader_load(NSString *pc, int stage) {
     NSString *full = rt ? [NSString stringWithContentsOfFile:rt_src encoding:NSUTF8StringEncoding error:nil] : nil;
     o->writes_depth = full && [full rangeOfString:@"[[depth("].location != NSNotFound;
     if (full) { o->src_path = rt_src; drv_scan(o, full); refl_mark_stores(o, j[@"bindings"], full); }   // TOTK: scan before iOS drops the source (NPC-culling fix needs it there too); rw from the MSL's stores
+    if (mip_drop_on()) refl_mark_level_exact(o, j[@"bindings"], full);   // TOTK (#337): slots whose texture keeps all levels (iOS)
     /* TOTK (2026-10-17): the MSL is read again from its file when a variant needs it (sh_src), on the Mac too -- keeping
        every source cost 255 MB of strings (7,691 of them) in a long session (analysis/long18 heap). TOTK_KEEP_MSL=1 keeps
        them in memory (the Mac's behaviour before). */
@@ -5855,7 +5926,7 @@ void mtl_prog_release(prog_t *p) { if (p->serial) serial_del(p->serial); }
 // and no live texture was found at its storage yet, so every serial-table step re-checks it (see tex_by_id).
 typedef struct { tex_t t; int ok; view_t v; int has_v; void *view; uint64_t view_id, view_rid, view_ser, view_dirty;
     uint64_t indexed_serial, used; int view_prev, view_next; uint8_t view_pkg, dead_pending;
-    uint8_t view_tt; void *view_parent; } treg_t;   // used (TOTK): last submission that resolved this id
+    uint8_t view_tt; void *view_parent; uint64_t keep_ser; } treg_t;   // used (TOTK): last submission that resolved this id   // keep_ser (TOTK #337): the serial tex_keep_levels last decided for
 /* TOTK: view_tt / view_parent: textureType and parentTexture of view, read once when it is stored (a Metal texture never
    changes either). view_parent is only compared, never messaged; the view retains its parent while it is stored. */
 static treg_t *g_treg; static int g_ntreg;
@@ -6065,7 +6136,7 @@ static void pkg_purge_idle(void) {
     for (uint32_t i = 0; i < g_by_serial.cap; i++) {
         __unsafe_unretained id o = (__bridge id)g_by_serial.vals[i];
         if (!o || ![o isKindOfClass:[NvPkg class]]) continue;
-        NvPkg *pk = (NvPkg *)o; if (!pk->tex || pk->vol || pk->owned || pk->hashed || pk->used + PURGE_IDLE > g_sub_serial) continue;
+        NvPkg *pk = (NvPkg *)o; if (!pk->tex || pk->vol || pk->owned || pk->hashed || pk->gpu_wrote || pk->used + PURGE_IDLE > g_sub_serial) continue;   // gpu_wrote: pkg_note_gpu_write
         [pk->tex setPurgeableState:MTLPurgeableStateVolatile]; pk->vol = 1;
         uint64_t ser; memcpy(&ser, g_by_serial.keys + (size_t)i * g_by_serial.klen, 8); ser_bump_locked(ser);
         k++; bytes += pk->tex.allocatedSize;
@@ -6100,7 +6171,7 @@ static void pkg_evict_sweep(void) {
     for (uint32_t i = 0; i < g_by_serial.cap; i++) {
         __unsafe_unretained id o = (__bridge id)g_by_serial.vals[i];
         if (!o || ![o isKindOfClass:[NvPkg class]]) continue;
-        NvPkg *pk = (NvPkg *)o; if (!pk->tex || pk->owned || pk->hashed) continue;
+        NvPkg *pk = (NvPkg *)o; if (!pk->tex || pk->owned || pk->hashed || pk->gpu_wrote) continue;   // gpu_wrote: pkg_note_gpu_write
         uint64_t bytes = pk->tex.allocatedSize; total += bytes; total_n++;
         { NSUInteger pf = pk->tex.pixelFormat; int j = 0; for (; j < nfmt && fmt_pf[j] != pf; j++) {} if (j == nfmt && nfmt < 16) { fmt_pf[nfmt] = pf; fmt_b[nfmt] = 0; fmt_n[nfmt++] = 0; } if (j < 16) { fmt_b[j] += bytes; fmt_n[j]++; } }
         if (pk->used + idle > g_sub_serial) continue;
@@ -6284,6 +6355,53 @@ static inline __attribute__((always_inline)) void *tex_fast(int tid) {
 static inline __attribute__((always_inline)) uint64_t tex_fast_rid(int tid, void **out) {
     if (tex_view_valid(tid)) { if (out) *out = g_treg[tid].view; return g_treg[tid].view_rid; }
     void *t = tex_by_id_p(tid); if (out) *out = t; return t ? ((__bridge id<MTLTexture>)t).gpuResourceID._impl : 0;
+}
+static inline int slot_level_exact(const uint64_t mask[3], unsigned slot) { return slot < 192 && (mask[slot >> 6] >> (slot & 63) & 1); }   // NvShader level_exact
+/* TOTK (#337): t is read or written at an exact level or texel (a shader slot in NvShader level_exact, a render target,
+   a GPU copy or clear): its CPU-pool copies keep all levels (TOTK_MIP_KEEP, mip_keep_mode). A texture not uploaded yet is
+   then uploaded at full size at once (keep_levels_has in tex_mtl); a reduced copy it already has is uploaded again here,
+   from the pool bytes, before the GPU uses it. gpu_op: a render target, copy or clear (1) or a shader slot (0), for the
+   log. */
+static uint64_t g_mip_keep_n, g_mip_keep_reup, g_mip_keep_bytes, g_mip_keep_ops;
+static void pkg_keep_levels(const tex_t *t, int gpu_op) {
+    if (!t || !t->serial || !mip_drop_of(t, NULL) || !tex_mirrored(t) || !mip_keep_mode()) return;   // its copies always have every level, or TOTK_MIP_KEEP=0
+    int had_copy = 0;
+    if (!pkg_keep_mark(t->serial, &had_copy)) return;   // marked before
+    int bw, bh, bpb = nvn_fmt_bpb(t->d.format, &bw, &bh);
+    unsigned layers = (t->d.target == 4 || t->d.target == 9) ? t->d.depth : t->d.target == 8 ? 6 : 1;
+    if (bpb && bw > 0 && bh > 0) g_mip_keep_bytes += (uint64_t)((t->d.width + bw - 1) / bw) * (uint64_t)bpb * ((t->d.height + bh - 1) / bh) * layers;   // the top level, in the NVN format
+    g_mip_keep_n++; g_mip_keep_ops += gpu_op != 0;
+    if (had_copy) { g_mip_keep_reup++; (void)tex_mtl_p(t); }   // pk->keep: tex_mtl uploads a reduced copy again at full size
+    if (g_mip_keep_n <= 3 || g_mip_keep_n % 200 == 0)
+        MLOG("大贴图副本保留最高一级（按纹素位置或指定级读写）：累计 %llu 张（其中因渲染 / GPU 拷贝 / 清除 %llu 张），已有副本的 %llu 张当场按全尺寸重传；多占约 %llu MB（按 NVN 格式的第 0 级算）（这次：%s，%ux%u 格式 %#x %u 级 目标 %d 序号 %llu）",
+             (unsigned long long)g_mip_keep_n, (unsigned long long)g_mip_keep_ops, (unsigned long long)g_mip_keep_reup, (unsigned long long)(g_mip_keep_bytes >> 20),
+             gpu_op ? "渲染目标 / GPU 拷贝 / 清除" : "着色器", t->d.width, t->d.height, t->d.format, t->d.levels, t->d.target, (unsigned long long)t->serial);
+}
+/* Texture id tid is bound to a slot in NvShader level_exact. Called before the slot is resolved; decided once per slot
+   and serial (keep_ser). A finalised serial is marked too (the replay may make a copy for it) but asked again, since
+   tex_by_id moves the slot to the live texture at its storage. Caller holds g_rmu. */
+static void tex_keep_levels(int tid) {
+    if (tid <= 0 || tid >= g_ntreg) return;
+    treg_t *rp = &g_treg[tid];
+    if (!rp->ok || !rp->t.serial || rp->keep_ser == rp->t.serial) return;
+    if (!serial_is_dead(rp->t.serial)) rp->keep_ser = rp->t.serial;
+    pkg_keep_levels(&rp->t, 0);
+}
+/* TOTK (iPhone): a GPU copy, clear or image store wrote the Metal copy of CPU-pool texture t. Only render targets make
+   a copy owned (gpu_owned_mark); this one is still uploaded again when the CPU writes the texture, but it is never made
+   purgeable or evicted (pkg_purge_idle, pkg_evict_sweep): its pool bytes do not hold what the GPU wrote, and a copy
+   made again from them would lose it. Called after tex_mtl gave the copy (a purgeable one is made non-purgeable there).
+   TOTK_TEX_KEEP_GPU_WRITTEN=0: such copies are purged and evicted like the others, as before. */
+static int gpu_written_keep(void) {
+    static int v = -1; if (v < 0) { const char *e = getenv("TOTK_TEX_KEEP_GPU_WRITTEN"); v = !(e && !atoi(e)); if (!v) MLOG("TOTK_TEX_KEEP_GPU_WRITTEN=0：GPU 拷贝 / 清除 / 图像写过的贴图副本也照常可清除、可淘汰（旧行为）"); }
+    return v;
+}
+static void pkg_note_gpu_write(const tex_t *t) {
+    if (!t || !t->serial || !tex_mirrored(t) || !gpu_written_keep()) return;
+    uint64_t k = t->serial;
+    pthread_mutex_lock(&g_smu);
+    __unsafe_unretained id o = hm_get_id(&g_by_serial, &k); if ([o isKindOfClass:[NvPkg class]]) ((NvPkg *)o)->gpu_wrote = 1;   // held by the serial table under g_smu
+    pthread_mutex_unlock(&g_smu);
 }
 static MTLSamplerAddressMode wrapm(int w) {
     switch (w) { case 0: case 7: return MTLSamplerAddressModeClampToEdge; case 1: return MTLSamplerAddressModeRepeat;
@@ -9117,6 +9235,7 @@ static int encode_args(id<MTLCommandEncoder> en, NvShader *sh, int nvn_stage, in
                 if (ok) PD("B %llu st%d samp reg%d sid=%d mag=%d min=%d cmp=%d/%d wrap=%d,%d,%d lod=%g..%g（0 最近点 / 1 双线性；2–5 带 mip）", g_stat_pass, nvn_stage, reg, sid, (int)sp.magf, (int)sp.minf, (int)sp.cmp_mode, (int)sp.cmp_func, (int)sp.ws, (int)sp.wt, (int)sp.wr, sp.lod_min, sp.lod_max); }
         } else if (b->kind == NVN_RB_TEX) {
             int tid = reg < 128 ? (int)(S.tex[nvn_stage][reg] & 0xfffff) : 0;
+            if (tid > 0 && slot_level_exact(sh->level_exact, (unsigned)reg)) tex_keep_levels(tid);   // TOTK (#337): dispatches have no prepare_draw_textures
             void *tv = NULL; uint64_t trid = tid ? tex_fast_rid(tid, &tv) : 0; __unsafe_unretained id<MTLTexture> t = (__bridge id<MTLTexture>)tv;
             if (nvn_stage == 1 && reg == 0 && !strncmp(sh->key, "0ac9a54938974396", 16) && getenv("DM_NVN_FLASHHDR")) g_flash_hdr_source = t;
             if (t && tid < g_ntreg) use_rec("tex", (uint64_t)g_treg[tid].t.mem, g_treg[tid].t.L.size, tid, &g_treg[tid].t);
@@ -9149,9 +9268,11 @@ static int encode_args(id<MTLCommandEncoder> en, NvShader *sh, int nvn_stage, in
             USE(t, MTLResourceUsageRead);
         } else if (b->kind == NVN_RB_IMG) {   // 可写贴图：NVN 图像槽 r（BindImages）↔ D3D u_r | Writable texture: NVN image slot r (BindImages) ↔ D3D u_r
             int tid = reg < 32 ? (int)(S.img[nvn_stage][reg] & 0xfffff) : 0;
+            if (tid > 0 && slot_level_exact(sh->level_exact, 128u + (unsigned)reg)) tex_keep_levels(tid);   // TOTK (#337)
             void *tv = NULL; uint64_t trid = tid ? tex_fast_rid(tid, &tv) : 0; __unsafe_unretained id<MTLTexture> t = (__bridge id<MTLTexture>)tv;
             if (passdump()) PD("W %llu st%d reg%d tid=%d %s ser=%llu", g_stat_pass, nvn_stage, reg, tid, t ? "实" : "哑", t && tid < g_ntreg ? g_treg[tid].t.serial : 0ull);
             if (t && !(t.usage & MTLTextureUsageShaderWrite)) { RED_ONCE(32, "图像槽绑的贴图没有可写用途（贴图号 %d）", tid); t = nil; }
+            if (t && b->rw && tid < g_ntreg) pkg_note_gpu_write(&g_treg[tid].t);   // TOTK: a shader stores into a CPU-pool texture's copy
             if (!t) { t = dummy_img(b->dtt, b->dpf); trid = g_dummy_img_rid[b->dtt & 7][b->dpf & 3]; }   // 未绑：D3D 语义写入丢弃——写进专用哑贴图，不污染读出 0 的那套 | Unbound: D3D semantics discard the write - write into a dedicated dummy texture so the set that reads 0 is not polluted
             slots[aid] = trid;
             USE(t, MTLResourceUsageRead | MTLResourceUsageWrite);
@@ -11349,12 +11470,13 @@ static void prepare_draw_textures(NvProg *pr) {
         registry_lock();
         for (int st = 0; st < 2; st++) { __unsafe_unretained NvShader *sh = pr->sh[st]; if (!sh) continue;
             int count = planned ? sh->texture_count : sh->rf.nb;
-            for (int i = 0; i < count; i++) { int tid = 0;
-                if (planned) { unsigned slot = sh->texture_slots[i]; tid = (int)((slot < 128 ? S.tex[st][slot] : S.img[st][slot - 128]) & 0xfffff); }
+            for (int i = 0; i < count; i++) { int tid = 0; unsigned slot = 192;
+                if (planned) { slot = sh->texture_slots[i]; tid = (int)((slot < 128 ? S.tex[st][slot] : S.img[st][slot - 128]) & 0xfffff); }
                 else { const nvn_rbind *b = &sh->rf.b[i];
-                    if ((b->kind == NVN_RB_TEX || b->kind == NVN_RB_TBUF) && b->reg < 128) tid = (int)(S.tex[st][b->reg] & 0xfffff);
-                    else if (b->kind == NVN_RB_IMG && b->reg < 32) tid = (int)(S.img[st][b->reg] & 0xfffff);
+                    if ((b->kind == NVN_RB_TEX || b->kind == NVN_RB_TBUF) && b->reg < 128) { slot = b->reg; tid = (int)(S.tex[st][b->reg] & 0xfffff); }
+                    else if (b->kind == NVN_RB_IMG && b->reg < 32) { slot = 128u + b->reg; tid = (int)(S.img[st][b->reg] & 0xfffff); }
                 }
+                if (tid > 0 && slot_level_exact(sh->level_exact, slot)) tex_keep_levels(tid);   // TOTK (#337): before its first upload
                 if (tid > 0) (void)tex_fast(tid);
                 if (g_tex_prepare_split) break;
             }
@@ -12617,6 +12739,7 @@ static void copy_t2b(const p_copy_b2t *c) {
     if (atomic_load(&g_draw_log) > 0 && c->tex)
         MLOG("[uw] F%llu pass %llu copy t2b ser %llu %ux%u fmt %#x region %d,%d %dx%d -> %#llx", (unsigned long long)atomic_load(&g_cur_frame), g_stat_pass, (unsigned long long)c->tex->serial,
              c->tex->d.width, c->tex->d.height, c->tex->d.format, c->r.xoffset, c->r.yoffset, c->r.width, c->r.height, (unsigned long long)c->src);
+    pkg_keep_levels(c->tex, 1);   // TOTK (#337): the copy reads the game's level by number
     id<MTLTexture> t = tex_mtl(c->tex);
     if (!t) return;
     int bw, bh, bpb = nvn_fmt_bpb(c->tex->d.format, &bw, &bh);
@@ -12793,9 +12916,11 @@ void mtl_write_texels(const tex_t *t, unsigned level, unsigned layer0, const NVN
 }
 static void copy_b2t(const p_copy_b2t *c) {
     if (c->tex) zskip_del(c->tex->serial);
+    pkg_keep_levels(c->tex, 1);   // TOTK (#337): the copy writes the game's level by number
     id<MTLTexture> t = tex_mtl(c->tex);
     PD("C ser=%llu", c->tex->serial);
     if (!t) return;
+    pkg_note_gpu_write(c->tex);
     int bw, bh, bpb = nvn_fmt_bpb(c->tex->d.format, &bw, &bh);
     unsigned level = c->has_view && c->view.set_levels ? c->view.base_level : 0, layer0 = c->has_view && c->view.set_layers ? c->view.min_layer : 0;
     size_t row = S.copy_stride ? (size_t)S.copy_stride : (size_t)((c->r.width + bw - 1) / bw) * bpb;
@@ -12881,9 +13006,11 @@ static void copy_t2t(const p_copy_t2t *c) {
         int ss = c->has_sv && c->sv.set_layers ? c->sv.min_layer : 0, ds = c->has_dv && c->dv.set_layers ? c->dv.min_layer : 0;
         if (zskip_has(c->src->serial, sl, ss)) zskip_add(c->dst->serial, dl, ds);
     }
+    pkg_keep_levels(c->src, 1); pkg_keep_levels(c->dst, 1);   // TOTK (#337): both ends name the game's levels by number
     id<MTLTexture> s = tex_mtl(c->src), d = tex_mtl(c->dst);
     PD("T src=%llu dst=%llu %dx%dx%d→%dx%dx%d flags=%#x", c->src->serial, c->dst->serial, c->sr.width, c->sr.height, c->sr.depth, c->dr.width, c->dr.height, c->dr.depth, c->flags);
     if (!s || !d) return;
+    pkg_note_gpu_write(c->dst);
     unsigned sl = c->has_sv && c->sv.set_levels ? c->sv.base_level : 0, dl = c->has_dv && c->dv.set_levels ? c->dv.base_level : 0;
     unsigned sz0 = c->has_sv && c->sv.set_layers ? c->sv.min_layer : 0, dz0 = c->has_dv && c->dv.set_layers ? c->dv.min_layer : 0;
     PD("t src=%llu lv%u sl%u xyz=%d,%d,%d dst=%llu lv%u sl%u xyz=%d,%d,%d size=%d,%d,%d", c->src->serial, sl, sz0, c->sr.xoffset, c->sr.yoffset, c->sr.zoffset,
@@ -12920,7 +13047,9 @@ static void clear_tex(const p_clear_tex *c) {
     if (atomic_load(&g_draw_log) > 0 && c->tex)
         MLOG("[uw] F%llu pass %llu clear tex ser %llu %ux%u fmt %#x region %d,%d %dx%d mask %#x %g %g %g %g", (unsigned long long)atomic_load(&g_cur_frame), g_stat_pass, (unsigned long long)c->tex->serial,
              c->tex->d.width, c->tex->d.height, c->tex->d.format, c->r.xoffset, c->r.yoffset, c->r.width, c->r.height, c->mask, c->c.f[0], c->c.f[1], c->c.f[2], c->c.f[3]);
+    pkg_keep_levels(c->tex, 1);   // TOTK (#337): the clear names the game's level by number
     id<MTLTexture> t = tex_mtl(c->tex);
+    if (t) pkg_note_gpu_write(c->tex);
     PD("X ser=%llu 视图格式 %#x 区域 %d,%d,%d %dx%dx%d 掩码 %#x %s %g,%g,%g,%g", c->tex->serial, c->has_view && c->view.set_format ? c->view.format : -1, c->r.xoffset, c->r.yoffset, c->r.zoffset, c->r.width, c->r.height, c->r.depth, c->mask,
        c->is_uint ? "ui" : "f", c->is_uint ? (double)c->c.u[0] : c->c.f[0], c->is_uint ? (double)c->c.u[1] : c->c.f[1], c->is_uint ? (double)c->c.u[2] : c->c.f[2], c->is_uint ? (double)c->c.u[3] : c->c.f[3]);
     if (!t) return;
