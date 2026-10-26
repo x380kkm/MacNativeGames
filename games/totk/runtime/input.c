@@ -145,7 +145,7 @@ __attribute__((constructor)) static void input_script_start(void) {
 /* Optional local integration-test command stream. Appending complete lines lets tests inspect each
    actual frame before choosing the next input, instead of guessing load/menu timings. Disabled normally.
    Commands: key <Mac keycode> <milliseconds>, down/up <Mac keycode>, shot <path>, wshot <path>, passdump <frames>, querylog <frames>, anomdump,
-   kbtest / kbtype <text> / kbenter / kbesc / kbshot <path> (the text entry bar), threads (dump every guest thread's wait), hletrace <0|1|2> (host calls the game makes), framestep <ms> (pin the frame step), close. */
+   kbtest / kbtype <text> / kbenter / kbesc / kbshot <path> (the text entry bar on the Mac, the box on iOS), threads (dump every guest thread's wait), hletrace <0|1|2> (host calls the game makes), framestep <ms> (pin the frame step), close. */
 extern void dm_gfx_shot_at(long frames, const char *path);
 extern void runtime_front_request_close(void);
 static void *input_file(void *arg) {
@@ -192,11 +192,11 @@ static void *input_file(void *arg) {
             line[strcspn(line, "\r\n")] = 0; if (!line[6]) runtime_fail("diagnostic ashot path");
             extern void dm_gfx_ashot(const char *path); dm_gfx_ashot(line + 6);
 #endif
-        } else if (!strcmp(line, "kbtest\n")) {   /* text entry bar the way the game names a horse (runtime/swkbd_host.c) */
+        } else if (!strcmp(line, "kbtest\n")) {   /* text entry bar or box the way the game names a horse (runtime/swkbd_host.c) */
             runtime_swkbd_selftest();
-        } else if (!strncmp(line, "kbtype ", 7)) {   /* "kbtype <text>": typed into the open bar */
+        } else if (!strncmp(line, "kbtype ", 7)) {   /* "kbtype <text>": typed into the open bar or box */
             line[strcspn(line, "\r\n")] = 0; runtime_front_text_test("type", line + 7);
-        } else if (!strncmp(line, "kbshot ", 7)) {   /* "kbshot <path>": the open bar as a PNG */
+        } else if (!strncmp(line, "kbshot ", 7)) {   /* "kbshot <path>": the open bar or box as a PNG */
             line[strcspn(line, "\r\n")] = 0; runtime_front_text_test("shot", line + 7);
         } else if (!strcmp(line, "kbenter\n") || !strcmp(line, "kbesc\n")) {
             runtime_front_text_test(line[2] == 'e' && line[3] == 'n' ? "enter" : "esc", NULL);

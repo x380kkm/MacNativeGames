@@ -166,7 +166,9 @@ void runtime_front_run(void(*callback)(void)){
    text is empty or too short, and Return then does nothing, as on the Mac. The box is presented by the
    topmost view controller of the key window of the scene in front, so the touch controls (a view under it) get none of
    its touches. The calling guest thread waits on a semaphore; the game's input is cleared when the box opens and again
-   when it closes, so a controller button pressed while typing does not reach the game afterwards.
+   when it closes, so a controller button pressed while typing does not reach the game afterwards. The wait has no time
+   limit, as on the Mac. A box that goes away without OK or Cancel (its window scene ends, or UIKit releases it) cancels,
+   as Escape does; the Mac bar cannot go away that way, as the process ends with the window there.
    TOTK_IOS_TEXT_ENTRY=0 cancels every request without the box, as all iOS builds did before 2026-10-26. */
 static int text_entry_enabled(void){const char *e=getenv("TOTK_IOS_TEXT_ENTRY");return !(e&&!strcmp(e,"0"));}
 /* The view controller that presents the box: the topmost one of the key window of the scene in front; when no scene is in
@@ -190,6 +192,7 @@ static UIViewController *text_entry_presenter(void){
 @property(nonatomic,copy) NSString *heading,*detail,*text;   /* text: what the field starts with */
 @property(nonatomic) int maxUnits,minUnits,digitsOnly,secure,attempts;
 @property(nonatomic) uint32_t disabled;
+@property(nonatomic) BOOL onScreen;   /* the box's presentation has finished (the diagnostics wait for it) */
 @property(nonatomic,copy) void(^done)(NSString *text);   /* nil text: cancelled; the property is nil once answered */
 -(void)show;
 -(void)refilter;
@@ -249,8 +252,15 @@ static __weak TOTKTextEntry *openEntry;   /* main thread only: the box the diagn
  UIAlertAction *ok=[UIAlertAction actionWithTitle:@(TOTK_UI("确定","OK")) style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){(void)a;
   if(![self confirm]){self.text=[self current];[self show];}}];
  [alert addAction:ok];alert.preferredAction=ok;   /* Return on a hardware keyboard */
- self.alert=alert;self.ok=ok;[self updateOK];
- [top presentViewController:alert animated:YES completion:nil];
+ self.alert=alert;self.ok=ok;self.onScreen=NO;[self updateOK];
+ /* UIKit drops a dismissal asked for while the box is still coming up, so a box answered then (kbenter or kbesc right
+    after kbtest) is closed here, once it is up. */
+ [top presentViewController:alert animated:YES completion:^{
+  self.onScreen=YES;
+  if(!self.done&&![alert isBeingDismissed])[alert.presentingViewController dismissViewControllerAnimated:YES completion:nil];}];
+ NSNotificationCenter *nc=NSNotificationCenter.defaultCenter;UIWindowScene *scene=top.viewIfLoaded.window.windowScene;
+ [nc removeObserver:self name:UISceneDidDisconnectNotification object:nil];
+ if(scene)[nc addObserver:self selector:@selector(sceneEnded:) name:UISceneDidDisconnectNotification object:scene];
  fprintf(stderr,"[totk] keyboard: text entry box shown (%s%s%s)\n",self.heading.UTF8String?:"",self.detail.length?" — ":"",self.detail.UTF8String?:"");
  dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC),dispatch_get_main_queue(),^{[self checkShown];});
 }
@@ -270,21 +280,34 @@ static __weak TOTKTextEntry *openEntry;   /* main thread only: the box the diagn
 -(void)finish:(NSString *)text{
  void(^d)(NSString *)=self.done;if(!d)return;
  self.done=nil;if(openEntry==self)openEntry=nil;
- UIAlertController *a=self.alert;   /* still up when Return, a test or a refused presentation answered */
- if(a.presentingViewController&&![a isBeingDismissed])[a.presentingViewController dismissViewControllerAnimated:YES completion:nil];
+ UIAlertController *a=self.alert;   /* still up when Return, a test or a refused presentation answered; still coming up: show closes it once up */
+ if(a.presentingViewController&&![a isBeingDismissed]&&![a isBeingPresented])[a.presentingViewController dismissViewControllerAnimated:YES completion:nil];
  runtime_input_clear();   /* what a controller pressed while the box was open */
  fprintf(stderr,"[totk] keyboard: text entry box %s\n",text?"confirmed":"cancelled");
  d(text);
 }
+/* The box's window scene ended (its window closed, or the system ended the scene in the background) and took the box
+   with it: cancelled. */
+-(void)sceneEnded:(NSNotification *)n{
+ (void)n;if(!self.done)return;
+ fprintf(stderr,"[totk] keyboard: the window of the text entry box closed\n");[self finish:nil];
+}
+/* The alert (its actions and text field handler), its presentation and a pending retry (checkShown) keep the entry. Going
+   away still unanswered means UIKit released the box without OK or Cancel, and nothing can answer the waiting guest
+   thread any more: cancelled. */
+-(void)dealloc{
+ if(!self.done)return;
+ fprintf(stderr,"[totk] keyboard: the text entry box went away unanswered\n");[self finish:nil];
+}
 @end
 /* Diagnostics (TOTK_INPUT_FILE kbtype / kbenter / kbesc / kbshot, runtime/input.c) on the open box. Off the main thread a
-   command first waits up to 5 s for a box to be on the screen, so a command file can say kbtest, kbtype, kbenter in a row
-   (the box opens on the main thread after kbtest returns). */
+   command first waits up to 5 s for a box whose presentation has finished, so a command file can say kbtest, kbtype,
+   kbenter in a row (the box opens on the main thread after kbtest returns), and kbshot draws the whole box. */
 void runtime_front_text_test(const char *op,const char *text){
  NSString *o=[NSString stringWithUTF8String:op?op:""]?:@"",*t=[NSString stringWithUTF8String:text?text:""]?:@"";
  if(![NSThread isMainThread])for(int i=0;i<100;i++){
   __block BOOL shown=NO;
-  dispatch_sync(dispatch_get_main_queue(), ^{TOTKTextEntry *e=openEntry;shown=e.done&&e.alert.presentingViewController;});
+  dispatch_sync(dispatch_get_main_queue(), ^{TOTKTextEntry *e=openEntry;shown=e.done&&e.onScreen;});
   if(shown)break;
   usleep(50000);
  }
