@@ -1,11 +1,14 @@
 """games/totk/ios/tools/package_ipa_windows.py and macho.py on a synthetic runtime executable (no game files, no SDK):
 the nine module sections written at their file offsets and checked against the layout and the executable's ios_embed
-table, the Info.plist rules, the runtime archive, the IPA written without zsign and the work folder's game data.
+table, the Info.plist rules, the runtime archive and the commit it names, the IPA written without zsign and the work
+folder's game data.
 
 With TOTK_IOS_RUNTIME=<the ios-runtime workflow's TOTK-runtime.zip>, TOTK_RECOVERED=<recover_ipa.py --out folder> and
 zsign (--zsign's $TOTK_ZSIGN or PATH) the real runtime is packaged (its nine sections written, ad-hoc signed) and the
 signature is checked, including that one changed byte of a written section is found."""
+import contextlib
 import hashlib
+import io
 import json
 import os
 import plistlib
@@ -15,6 +18,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 TOOLS = Path(__file__).resolve().parents[1]/'games/totk/ios/tools'
 sys.path.insert(0, str(TOOLS))
@@ -23,6 +27,7 @@ import package_ipa_windows as package  # noqa: E402
 import sign_ipa_windows as signing  # noqa: E402
 
 CHAIN = 'totk-native-v8-unverified'
+COMMIT = '89c0131b058d4b0d72e365eaca6ff40d7f6bc924'
 BASE = 0x100000000
 NAMES = ('main', 'subsdk0', 'sdk')
 SECTIONS = {name: {'x0': ('__TOTKX', f'__{name}x0'), 'w': (f'__TOTK{name}W', '__img'), 'x1': ('__TOTKX', f'__{name}x1')}
@@ -201,18 +206,28 @@ class InfoPlist(unittest.TestCase):
         self.assertNotIn('TOTKSourceCommit', info)   # set to this build's only where the old app had them
 
 
+def runtime_zip(path, commit=None, folder=''):
+    """A TOTK-runtime.zip as ios-runtime.yml packs it: <folder>TOTK.app (an executable, the build's signature and a
+    settings file) and, given commit, TOTK-runtime.commit beside it holding that text; an artifact from before the
+    workflow wrote the file has none."""
+    app = f'{folder}TOTK.app/'
+    with zipfile.ZipFile(path, 'w') as z:
+        z.writestr(app, b''); z.writestr(app + 'Info.plist', plistlib.dumps({'CFBundleExecutable': 'TOTK'}))
+        z.writestr(app + 'TOTK', b'exe'); z.writestr(app + '_CodeSignature/CodeResources', b'old')
+        z.writestr(app + 'Settings.bundle/Root.plist', b'settings')
+        if commit is not None:
+            z.writestr(folder + package.RUNTIME_COMMIT, commit)
+    return path
+
+
 class Archive(unittest.TestCase):
     def test_the_runtime_archive_unpacks_without_its_signature(self):
         with tempfile.TemporaryDirectory() as d:
-            artifact = Path(d)/'TOTK-runtime.zip'
-            with zipfile.ZipFile(artifact, 'w') as z:
-                z.writestr('TOTK.app/', b''); z.writestr('TOTK.app/Info.plist', plistlib.dumps({'CFBundleExecutable': 'TOTK'}))
-                z.writestr('TOTK.app/TOTK', b'exe'); z.writestr('TOTK.app/_CodeSignature/CodeResources', b'old')
-                z.writestr('TOTK.app/Settings.bundle/Root.plist', b'settings')
+            artifact = runtime_zip(Path(d)/'TOTK-runtime.zip', COMMIT + '\n')
             app = Path(d)/'stage/Payload/TOTK.app'
             self.assertEqual(package.unpack_runtime(artifact, app), {'CFBundleExecutable': 'TOTK'})
             self.assertEqual(sorted(p.relative_to(app).as_posix() for p in app.rglob('*') if p.is_file()),
-                             ['Info.plist', 'Settings.bundle/Root.plist', 'TOTK'])
+                             ['Info.plist', 'Settings.bundle/Root.plist', 'TOTK'])   # TOTK-runtime.commit stays out
             folder = Path(d)/'again/TOTK.app'
             package.unpack_runtime(app, folder)   # a TOTK.app folder too
             self.assertEqual((folder/'TOTK').read_bytes(), b'exe')
@@ -229,6 +244,39 @@ class Archive(unittest.TestCase):
                 self.assertEqual({i.filename: (i.external_attr >> 16, i.create_system, i.compress_type) for i in z.infolist()},
                                  {'Payload/A.app/A': (0o100755, 3, 0), 'Payload/A.app/GameData/x': (0o100644, 3, 0)})
                 self.assertEqual(z.read('Payload/A.app/GameData/x'), b'data')
+
+
+class SourceCommit(unittest.TestCase):
+    def test_the_runtime_names_its_commit_in_the_archive_or_beside_the_app_unpacked_from_it(self):
+        with tempfile.TemporaryDirectory() as d:
+            artifact = runtime_zip(Path(d)/'TOTK-runtime.zip', COMMIT + '\n')
+            self.assertEqual(package.runtime_commit(artifact), COMMIT)
+            self.assertEqual(package.runtime_commit(runtime_zip(Path(d)/'payload.zip', COMMIT + '\r\n', 'Payload/')), COMMIT)
+            self.assertIsNone(package.runtime_commit(runtime_zip(Path(d)/'old.zip')))
+            with zipfile.ZipFile(artifact) as z:
+                z.extractall(Path(d)/'unpacked')
+            self.assertEqual(package.runtime_commit(Path(d)/'unpacked/TOTK.app'), COMMIT)
+            (Path(d)/'unpacked'/package.RUNTIME_COMMIT).unlink()
+            self.assertIsNone(package.runtime_commit(Path(d)/'unpacked/TOTK.app'))
+
+    def test_a_commit_file_that_names_no_commit_stops_it(self):
+        with tempfile.TemporaryDirectory() as d:
+            for text in ('', 'ios-windows-fixes\n', COMMIT[:12] + '\n', COMMIT + 'z\n'):
+                with self.subTest(text=text), self.assertRaises(package.PackageError):
+                    package.runtime_commit(runtime_zip(Path(d)/'bad.zip', text))
+
+    def test_the_option_comes_first_then_the_runtime_then_the_checkout_with_a_warning(self):
+        with tempfile.TemporaryDirectory() as d:
+            named, old = runtime_zip(Path(d)/'named.zip', COMMIT + '\n'), runtime_zip(Path(d)/'old.zip')
+            head, out = 'f' * 40, io.StringIO()
+            with mock.patch.object(package, 'git_commit', return_value=head), contextlib.redirect_stdout(out):
+                self.assertEqual(package.source_commit('abc', named), ('abc', '--source-commit'))
+                self.assertEqual(package.source_commit('abc', old), ('abc', '--source-commit'))
+                self.assertEqual(package.source_commit(None, named), (COMMIT, package.RUNTIME_COMMIT))
+                self.assertEqual(out.getvalue(), '')
+                self.assertEqual(package.source_commit(None, old), (head, 'checkout HEAD'))
+            self.assertIn('warning', out.getvalue())
+            self.assertIn(head, out.getvalue())
 
 
 class GameData(unittest.TestCase):

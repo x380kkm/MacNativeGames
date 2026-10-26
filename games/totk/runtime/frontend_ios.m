@@ -1,5 +1,5 @@
 /* Native iOS view and VI service adapter: the iPhone counterpart of frontend.m (same exported functions).
-   The app (ios/app/Sources/main.m) owns UIKit: it creates the full-screen Metal view, hands its layer over with
+   The app (ios/Sources/main.m) owns UIKit: it creates the full-screen Metal view, hands its layer over with
    runtime_ios_attach_layer, and calls the loader's main on a game thread. No guest frame is synthesized. */
 #import <UIKit/UIKit.h>
 #import <QuartzCore/CAMetalLayer.h>
@@ -56,7 +56,9 @@ void runtime_boot_status(const char *stage,const char *detail){
  NSString *d=[NSString stringWithUTF8String:detail?detail:TOTK_UI("正在处理，请稍候","Working, please wait")];
  dispatch_async(dispatch_get_main_queue(), ^{if(!bootOverlay||bootOverlay.hidden)return;bootStage.text=s;bootDetail.text=d;bootProgress.hidden=YES;});
 }
-/* Background shader/pipeline warm-up progress (iOS ships with the warm manifest off, but the hooks are shared with the Mac front end). */
+/* Shader and pipeline warm-up progress (nvn_mtl.m warm_start), shown while the start-up screen is up: the title waits for
+   the warm-up on iOS as on the Mac (TOTK_WARM_BEFORE_TITLE). While the shader libraries are compiled on the device, the
+   pipeline archive fill reports through runtime_boot_count instead (warm_fill_progress). */
 void runtime_warm_progress(uint64_t done,uint64_t total,uint64_t shaders,uint64_t shader_total,uint64_t pipelines,uint64_t pipeline_total){
  (void)shaders;(void)shader_total;(void)pipelines;(void)pipeline_total;
  dispatch_async(dispatch_get_main_queue(), ^{
@@ -253,8 +255,9 @@ static __weak TOTKTextEntry *openEntry;   /* main thread only: the box the diagn
   if(![self confirm]){self.text=[self current];[self show];}}];
  [alert addAction:ok];alert.preferredAction=ok;   /* Return on a hardware keyboard */
  self.alert=alert;self.ok=ok;self.onScreen=NO;[self updateOK];
- /* UIKit drops a dismissal asked for while the box is still coming up, so a box answered then (kbenter or kbesc right
-    after kbtest) is closed here, once it is up. */
+ /* UIKit drops a dismissal asked for while the box is still coming up, so a box answered then is closed here, once it is
+    up: Return on a hardware keyboard with enough text in the field already, its window scene ending, or a diagnostic
+    command whose 5 s wait (runtime_front_text_test) ran out. */
  [top presentViewController:alert animated:YES completion:^{
   self.onScreen=YES;
   if(!self.done&&![alert isBeingDismissed])[alert.presentingViewController dismissViewControllerAnimated:YES completion:nil];}];
@@ -280,7 +283,7 @@ static __weak TOTKTextEntry *openEntry;   /* main thread only: the box the diagn
 -(void)finish:(NSString *)text{
  void(^d)(NSString *)=self.done;if(!d)return;
  self.done=nil;if(openEntry==self)openEntry=nil;
- UIAlertController *a=self.alert;   /* still up when Return, a test or a refused presentation answered; still coming up: show closes it once up */
+ UIAlertController *a=self.alert;   /* still up when Return or a test answered; still coming up: show closes it once up */
  if(a.presentingViewController&&![a isBeingDismissed]&&![a isBeingPresented])[a.presentingViewController dismissViewControllerAnimated:YES completion:nil];
  runtime_input_clear();   /* what a controller pressed while the box was open */
  fprintf(stderr,"[totk] keyboard: text entry box %s\n",text?"confirmed":"cancelled");

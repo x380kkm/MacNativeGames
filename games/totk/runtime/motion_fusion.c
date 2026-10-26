@@ -1,5 +1,7 @@
-/* Six-axis states from the Mac controller's motion samples (2026-10-17; fed by runtime/gamepad_feedback.m, read by the
-   game through runtime/hid_feedback.c, only with TOTK_GYRO=1).
+/* Six-axis states from motion samples (2026-10-17), read by the game through runtime/hid_feedback.c while it has the
+   six-axis sensor: on by default, off with TOTK_GYRO=0, and without TOTK_GYRO in an agent's test session or with
+   gyro.txt saying off (runtime/feedback_settings.h). Fed by runtime/gamepad_feedback.m on the Mac (a controller's
+   motion) and by ios/Sources/motion_input.m on iPhone and iPad (2026-10-26: a controller's or the device's motion).
    Input per sample: acceleration in G including gravity and rotation rate in rad/s, in the controller's frame (GCMotion:
    x to the right, y toward the top edge, z out of the face; lying face up it reads z = -1 G). That is the Switch's
    six-axis frame, so by default nothing is remapped; TOTK_GYRO_AXES="-x,y,-z" style remaps (a reflection also flips the

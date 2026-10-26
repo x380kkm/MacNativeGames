@@ -5,7 +5,8 @@ name: iOS runtime without game content
 # games/totk/ios/ci/embed-layout-v143.json and the executable carries its hashes; that layout was written with
 # gen_embed.py --layout-of from the sections of an app built at 30a1b93 (the pinned 1.4.3 rewrites as that build's
 # export left them). The machine that holds the game files writes the sections into the executable, adds the game data
-# and signs the app.
+# and signs the app. TOTK-runtime.zip holds TOTK.app and beside it TOTK-runtime.commit, the commit the run built
+# (github.sha), which package_ipa_windows.py takes as the app's TOTKSourceCommit.
 
 on:
   push:
@@ -38,8 +39,22 @@ jobs:
           python games/totk/ios/tools/build_ipa.py --tree games/totk --version v143 --runtime-only
           --embed-layout games/totk/ios/ci/embed-layout-v143.json
           --out "$RUNNER_TEMP/TOTK.app" --logs "$RUNNER_TEMP/logs"
-      - name: Pack the app
-        run: ditto -c -k --keepParent "$RUNNER_TEMP/TOTK.app" "$RUNNER_TEMP/TOTK-runtime.zip"
+      - name: Pack the app with the commit it was built from
+        env:
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          mkdir "$RUNNER_TEMP/runtime"
+          mv "$RUNNER_TEMP/TOTK.app" "$RUNNER_TEMP/runtime/"
+          printf '%s\n' "$SOURCE_COMMIT" > "$RUNNER_TEMP/runtime/TOTK-runtime.commit"
+          ditto -c -k "$RUNNER_TEMP/runtime" "$RUNNER_TEMP/TOTK-runtime.zip"
+          python -I - "$RUNNER_TEMP/TOTK-runtime.zip" "$SOURCE_COMMIT" <<'EOF'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, 'games/totk/ios/tools')
+          import package_ipa_windows
+          named = package_ipa_windows.runtime_commit(Path(sys.argv[1]))
+          sys.exit(None if named == sys.argv[2] else f'{sys.argv[1]} names {named}, not {sys.argv[2]}')
+          EOF
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: totk-ios-runtime

@@ -32,8 +32,9 @@
 //   32         75.2 / 71.4   12.1 / 11.8    7,903 / 8,201 MB
 // Breath of the Wild 1.6.0 at 8 per file: 23.4 s first start (9,224 pipelines), 3.4 s second.
 // The key only finds the file: Metal checks the functions and state, so a wrong file is a miss, never a wrong pipeline.
-// On everywhere; TOTK_PIPELINE_ARCHIVE=0 turns it off. Valid for one OS version, GPU and translation chain
-// (pipelines/identity.json); otherwise the folder is removed. Included by nvn_mtl.m after MLOG and g_dev.
+// On everywhere; TOTK_PIPELINE_ARCHIVE=0 turns it off. Valid for one OS version, GPU and translation chain, and on iOS
+// for one origin of the shader libraries (par_identity, pipelines/identity.json); otherwise the folder is removed.
+// Included by nvn_mtl.m after MLOG and g_dev.
 #pragma once
 #import <Metal/Metal.h>
 #include <CommonCrypto/CommonDigest.h>
@@ -51,7 +52,7 @@ static NSMutableSet<NSString *> *g_par_have;                              // key
 static NSMutableDictionary<NSString *, NSString *> *g_par_where;          // key -> the file (name) holding it
 static NSMutableSet<NSString *> *g_par_pending;                           // keys in a batch not written yet
 static NSMutableDictionary<NSString *, id<MTLBinaryArchive>> *g_par_open; // opened files by name (kept: Metal keeps their memory anyway)
-static int g_par_on, g_par_valid;                                        // valid: files of this OS / GPU / chain exist
+static int g_par_on, g_par_valid;                                        // valid: files of this identity exist (par_identity)
 static _Atomic uint64_t g_par_written, g_par_write_failed, g_par_files, g_par_add_ns, g_par_flush_ns;
 static _Atomic int par_filling;                                          // the background fill (warm_fill_archive)
 static __thread int par_write_in_place;                                  // the fill's and the start-up warm-up's thread: they write at once
@@ -85,9 +86,17 @@ static int par_fill_light(void) {
 static NSString *par_dir(void) { return [totk_rt_dir() stringByAppendingPathComponent:@"pipelines"]; }
 static NSString *par_file(NSString *name) { return [par_dir() stringByAppendingFormat:@"/%@.metalarchive", name]; }
 static NSString *par_keys_file(NSString *name) { return [par_dir() stringByAppendingFormat:@"/%@.keys", name]; }
+static int g_warm_from_source;   // nvn_mtl.m: the shader libraries are compiled here from MSL (iOS), decided before the folder opens
+/* What the folder's files are valid for. "libs": "msl" only where the libraries are compiled here from MSL
+   (g_warm_from_source), so an identity with prebuilt libraries stays as before. Metal takes a pipeline from a file only
+   when its functions match (see the top), and par_write keeps the file a key has: if a switch between the two origins
+   changes the functions, the pipelines written for the old one would miss their files and never be written again, so
+   the folder is made anew instead. */
 static NSDictionary *par_identity(id<MTLDevice> dev) {
-    return @{@"schema": @4, @"chain": @DMSH_CHAIN, @"gpu": dev.name ?: @"?",
-             @"os": NSProcessInfo.processInfo.operatingSystemVersionString ?: @"?"};
+    NSMutableDictionary *identity = [@{@"schema": @4, @"chain": @DMSH_CHAIN, @"gpu": dev.name ?: @"?",
+                                       @"os": NSProcessInfo.processInfo.operatingSystemVersionString ?: @"?"} mutableCopy];
+    if (g_warm_from_source) identity[@"libs"] = @"msl";
+    return identity;
 }
 static NSString *par_hash(const void *bytes, size_t n) {
     uint8_t d[CC_SHA256_DIGEST_LENGTH]; CC_SHA256(bytes, (CC_LONG)n, d);
@@ -157,7 +166,7 @@ static uint64_t par_load_dir(NSUInteger *files) {
     }
     return bytes;
 }
-// Once: the folder of this OS version, GPU and chain, and the keys it has files for.
+// Once: the folder of this identity (par_identity), and the keys it has files for.
 static void par_open_dir(id<MTLDevice> dev) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
@@ -180,7 +189,7 @@ static void par_open_dir(id<MTLDevice> dev) {
         [fm removeItemAtPath:[totk_rt_dir() stringByAppendingPathComponent:@"pipelines.metalarchive"] error:nil];   // layouts of earlier tests
         [fm removeItemAtPath:[totk_rt_dir() stringByAppendingPathComponent:@"pipelines.json"] error:nil];
         if (![stamp isEqual:par_identity(dev)] && [fm fileExistsAtPath:par_dir()]) {
-            if (stamp) MLOG("管线存档：系统版本、GPU 或翻译链变了，删掉重建");
+            if (stamp) MLOG("管线存档：%s变了，删掉重建", TARGET_OS_IPHONE ? "系统版本、GPU、翻译链或着色器库的来源（预编译 / 本机从 MSL 编）" : "系统版本、GPU 或翻译链");
             [fm removeItemAtPath:par_dir() error:nil];
         }
         [fm createDirectoryAtPath:par_dir() withIntermediateDirectories:YES attributes:nil error:nil];

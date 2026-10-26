@@ -156,8 +156,10 @@ void runtime_mouse_release(void);                   /* main thread: buttons up, 
 void runtime_touch_pad_set(const RuntimeGamepadState *state);   /* on-screen touch controls (iOS) */
 int runtime_phone_fps(void);                /* d2r_gfx hle_nvn.c, iPhone / iPad: 30 while held at 30 (TOTK_PHONE_FPS), else 60 */
 void runtime_phone_fps_set(int fps);        /* 30 holds 30, anything else up to 60: the touch controls' button, at once */
-/* Controller rumble and motion (opt-in TOTK_RUMBLE=1 / TOTK_GYRO=1): the game's hid side in runtime/hid_feedback.c, the
-   Mac controller's haptics and motion sensors in runtime/gamepad_feedback.m. */
+/* Controller rumble and motion: on by default, off with TOTK_RUMBLE=0 / TOTK_GYRO=0, and without the variable in an agent's
+   test session or with rumble.txt / gyro.txt saying off (runtime/feedback_settings.h). The game's hid side is in
+   runtime/hid_feedback.c, the Mac controller's haptics and motion sensors in runtime/gamepad_feedback.m (stubs on iOS,
+   where ios/Sources/motion_input.m feeds the motion and nothing rumbles). */
 #define RUNTIME_MOTION_MAX 32
 typedef struct { uint64_t sampling, delta_ns; float acc[3], gyro[3], angle[3], dir[9]; } RuntimeMotionState;   /* G, rev/s, rev, 3 axes */
 int runtime_rumble_enabled(void);

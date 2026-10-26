@@ -85,7 +85,8 @@ static uint32_t show_controller_support(ControllerSupportResult *out,const void 
  static int once;if(!once++)fprintf(stderr,"[totk] controller support applet: one player on controller %#x\n",pad_id());
  return 0;
 }
-/* Vibration devices and the six-axis sensor: runtime/hid_feedback.c (none unless TOTK_RUMBLE=1 / TOTK_GYRO=1). */
+/* Vibration devices and the six-axis sensor: runtime/hid_feedback.c (on by default, off with TOTK_RUMBLE=0 / TOTK_GYRO=0,
+   and without the variable in an agent's test session or with rumble.txt / gyro.txt saying off). */
 #ifdef GAME_BOTW
 /* SDK 7 (Breath of the Wild 1.6.0, botw.md). The console's own seven-axis sensor (Labo VR) is absent on a Mac: it starts and
    stops without states. Gyroscope zero-drift mode and the dual Joy-Con assignment change nothing for the host controller.
@@ -144,6 +145,8 @@ __attribute__((constructor)) static void input_script_start(void) {
 
 /* Optional local integration-test command stream. Appending complete lines lets tests inspect each
    actual frame before choosing the next input, instead of guessing load/menu timings. Disabled normally.
+   A command is its line up to the first CR or LF, so lines may end with LF or CRLF (a file written on Windows), and a
+   last line without either counts as well.
    Commands: key <Mac keycode> <milliseconds>, down/up <Mac keycode>, shot <path>, wshot <path>, passdump <frames>, querylog <frames>, anomdump,
    kbtest / kbtype <text> / kbenter / kbesc / kbshot <path> (the text entry bar on the Mac, the box on iOS), threads (dump every guest thread's wait), hletrace <0|1|2> (host calls the game makes), framestep <ms> (pin the frame step), close. */
 extern void dm_gfx_shot_at(long frames, const char *path);
@@ -153,6 +156,7 @@ static void *input_file(void *arg) {
     char line[1200];
     for (;;) {
         if (!fgets(line, sizeof line, f)) { if (ferror(f)) runtime_fail("diagnostic input read"); clearerr(f); usleep(100000); continue; }
+        line[strcspn(line, "\r\n")] = 0;
         if (runtime_survey_command(line)) continue;
         unsigned code, ms; int used = 0;
         if (sscanf(line, "down %u %n", &code, &used) == 1 && used && !line[used] && code < 128) {
@@ -164,7 +168,7 @@ static void *input_file(void *arg) {
             runtime_input_key_synthetic(code, 1); usleep(ms * 1000); runtime_input_key_synthetic(code, 0);
         } else if (sscanf(line, "passdump %u %n", &code, &used) == 1 && used && !line[used] && code > 0 && code < 16) {
             extern void dm_gfx_passdump_next(long n); dm_gfx_passdump_next((long)code);
-        } else if (!strncmp(line, "anomdump", 8) && (line[8] == '\n' || line[8] == '\r' || !line[8])) {   /* TOTK_ANOMALY=<dir>: write the per-draw records (with GPU sample counts) of the last frames now */
+        } else if (!strcmp(line, "anomdump")) {   /* TOTK_ANOMALY=<dir>: write the per-draw records (with GPU sample counts) of the last frames now */
             extern void dm_gfx_anomdump(void); dm_gfx_anomdump();
         } else if (sscanf(line, "querylog %u %n", &code, &used) == 1 && used && !line[used] && code > 0 && code <= 600) {
             extern void dm_gfx_querylog_next(long n); dm_gfx_querylog_next((long)code);   /* occlusion query results of the next n frames */
@@ -174,31 +178,31 @@ static void *input_file(void *arg) {
             extern void dm_gfx_set_flag(const char *name, int v); if (!runtime_hid_feedback_flag(name, v)) dm_gfx_set_flag(name, v);
         } else if (!strncmp(line, "texdump ", 8)) {
             extern void dm_gfx_texdump_next(const char *path);
-            line[strcspn(line, "\r\n")] = 0; if (!line[8] || !strstr(line + 8, "%d")) runtime_fail("diagnostic texdump path needs %d");
+            if (!line[8] || !strstr(line + 8, "%d")) runtime_fail("diagnostic texdump path needs %d");
             dm_gfx_texdump_next(line + 8);
         } else if (sscanf(line, "shotn %u %n", &code, &used) == 1 && used && code > 0 && code <= 60) {
             /* "shotn <n> <path with %d>": screenshots of n consecutive game frames (frame flicker); %d = 0..n-1 */
-            line[strcspn(line, "\r\n")] = 0; const char *fmt = line + used;
+            const char *fmt = line + used;
             if (!*fmt || !strstr(fmt, "%d") || strchr(strstr(fmt, "%d") + 2, '%')) runtime_fail("diagnostic shotn path needs one %d");
             for (unsigned i = 0; i < code; i++) { char p[1200]; snprintf(p, sizeof p, fmt, (int)i); dm_gfx_shot_at(2 + (long)i, p); }
         } else if (!strncmp(line, "shot ", 5)) {
-            line[strcspn(line, "\r\n")] = 0; if (!line[5]) runtime_fail("diagnostic screenshot path");
+            if (!line[5]) runtime_fail("diagnostic screenshot path");
             dm_gfx_shot_at(2, line + 5);
         } else if (!strncmp(line, "wshot ", 6)) {   /* "wshot <path>": the next shown picture as the window shows it (FPS box and the bottom-left box included) */
-            line[strcspn(line, "\r\n")] = 0; if (!line[6]) runtime_fail("diagnostic window screenshot path");
+            if (!line[6]) runtime_fail("diagnostic window screenshot path");
             extern void dm_gfx_window_shot(const char *path); dm_gfx_window_shot(line + 6);
 #ifdef GAME_BOTW
         } else if (!strncmp(line, "ashot ", 6)) {   /* "ashot <path>": the next game frame, written in the background, its present time logged (botw.md) */
-            line[strcspn(line, "\r\n")] = 0; if (!line[6]) runtime_fail("diagnostic ashot path");
+            if (!line[6]) runtime_fail("diagnostic ashot path");
             extern void dm_gfx_ashot(const char *path); dm_gfx_ashot(line + 6);
 #endif
-        } else if (!strcmp(line, "kbtest\n")) {   /* text entry bar or box the way the game names a horse (runtime/swkbd_host.c) */
+        } else if (!strcmp(line, "kbtest")) {   /* text entry bar or box the way the game names a horse (runtime/swkbd_host.c) */
             runtime_swkbd_selftest();
         } else if (!strncmp(line, "kbtype ", 7)) {   /* "kbtype <text>": typed into the open bar or box */
-            line[strcspn(line, "\r\n")] = 0; runtime_front_text_test("type", line + 7);
+            runtime_front_text_test("type", line + 7);
         } else if (!strncmp(line, "kbshot ", 7)) {   /* "kbshot <path>": the open bar or box as a PNG */
-            line[strcspn(line, "\r\n")] = 0; runtime_front_text_test("shot", line + 7);
-        } else if (!strcmp(line, "kbenter\n") || !strcmp(line, "kbesc\n")) {
+            runtime_front_text_test("shot", line + 7);
+        } else if (!strcmp(line, "kbenter") || !strcmp(line, "kbesc")) {
             runtime_front_text_test(line[2] == 'e' && line[3] == 'n' ? "enter" : "esc", NULL);
         } else if (sscanf(line, "hletrace %u %n", &code, &used) == 1 && used && !line[used] && code <= 2) {
             runtime_hle_trace_set((int)code);   /* 1 count host calls, 2 also log the first call of each, 0 stop and print the counts */
@@ -216,9 +220,9 @@ static void *input_file(void *arg) {
             unsigned off; float value; if (sscanf(line + 6, "%x %f", &off, &value) != 2 || off > 0x400 || off % 4) runtime_fail("xpoke <hex offset, a multiple of 4> <value>");
             runtime_diag_xpoke(off, value);
 #endif
-        } else if (!strcmp(line, "threads\n")) {   /* every guest thread's wait state and guest return chain, now (a hang: what is each thread waiting for) */
+        } else if (!strcmp(line, "threads")) {   /* every guest thread's wait state and guest return chain, now (a hang: what is each thread waiting for) */
             runtime_dump_threads();
-        } else if (!strcmp(line, "close\n")) { runtime_front_request_close(); break; }
+        } else if (!strcmp(line, "close")) { runtime_front_request_close(); break; }
         else runtime_fail("invalid diagnostic input command");
     }
     fclose(f); return NULL;

@@ -18,10 +18,13 @@ sections against it at start).
 The app: the runtime's own files and Info.plist (xcodegen made it from ios/project.yml), then the keys of the app the
 device has (<old app>/Info.plist) that the runtime's lacks, Xcode's build keys (DT*, BuildMachineOSBuild) excepted, so
 nothing a player's install relied on goes missing (the builder's TOTK* keys, of which TOTKSourceCommit and TOTKBuildDate
-are set to this build's: --source-commit, the commit the workflow run built, as the artifact does not name it; this
-checkout's HEAD by default, and today). The bundle identifier comes from the profile (or --bundle-id); the version and build number
-stay those of the old app (1.4.3, 2610.22.1) unless given. The old app's icon (Assets.car, AppIcon*.png and its
-CFBundleIcons keys) goes in when the runtime has none, its default.metallib when the runtime lacks one.
+are set to this build's: the commit the runtime was built from, and today). That commit is --source-commit, else the
+TOTK-runtime.commit the workflow packs beside TOTK.app in TOTK-runtime.zip (read there, or beside a TOTK.app folder
+unpacked from it), else this checkout's HEAD with a warning: an artifact from before the workflow wrote the file does not
+name its commit, and HEAD is that commit only while the checkout has not moved since the run. The bundle identifier
+comes from the profile (or --bundle-id); the version and build number stay those of the old app (1.4.3, 2610.22.1)
+unless given. The old app's icon (Assets.car, AppIcon*.png and its CFBundleIcons keys) goes in when the runtime has
+none, its default.metallib when the runtime lacks one.
 
 GameData (ios/Sources/main.m): game-data, romfs (runtime-index.bin, index.json, merge.log), romfs-patches,
 romfs-patches-out and shared-fonts from the tree, each file checked against <tree>/recover-manifest.json when there is
@@ -60,6 +63,7 @@ XCODE_BUILD_KEYS = {'BuildMachineOSBuild', 'DTCompiler', 'DTPlatformBuild', 'DTP
                     'DTSDKBuild', 'DTSDKName', 'DTXcode', 'DTXcodeBuild'}   # what one Xcode build says about itself
 ICON_KEYS = ('CFBundleIcons', 'CFBundleIcons~ipad')
 ROMFS_IMAGE = re.compile(r'^romfs\.bin(\.\d{3})?$')
+RUNTIME_COMMIT = 'TOTK-runtime.commit'   # ios-runtime.yml packs it beside TOTK.app: github.sha and a newline
 say = build_app.say
 
 
@@ -160,6 +164,13 @@ def game_data(tree, res, mode):
     return count
 
 
+def zipped_app(z, runtime):
+    """The folder of the one <name>.app in the runtime archive z, with its slash: '<name>.app/' or 'Payload/<name>.app/'."""
+    plists = [n for n in z.namelist() if re.fullmatch(r'(?:Payload/)?[^/]+\.app/Info\.plist', n)]
+    require(len(plists) == 1, f'{runtime}: not one <name>.app in the archive')
+    return plists[0][:-len('Info.plist')]
+
+
 def unpack_runtime(runtime, app):
     """The runtime (TOTK-runtime.zip, or a TOTK.app folder) into the staging app folder; returns its Info.plist."""
     if runtime.is_dir():
@@ -168,9 +179,7 @@ def unpack_runtime(runtime, app):
     else:
         require(zipfile.is_zipfile(runtime), f'{runtime}: neither TOTK-runtime.zip nor a TOTK.app folder')
         with zipfile.ZipFile(runtime) as z:
-            plists = [n for n in z.namelist() if re.fullmatch(r'(?:Payload/)?[^/]+\.app/Info\.plist', n)]
-            require(len(plists) == 1, f'{runtime}: not one <name>.app in the archive')
-            prefix = plists[0][:-len('Info.plist')]
+            prefix = zipped_app(z, runtime)
             for n in z.namelist():
                 rel = n[len(prefix):]
                 if not n.startswith(prefix) or not rel or n.endswith('/'):
@@ -217,6 +226,39 @@ def git_commit():
         return 'unknown'
 
 
+def runtime_commit(runtime):
+    """The commit the workflow built the runtime from: the TOTK-runtime.commit beside the .app, in the archive or beside a
+    TOTK.app folder unpacked from it. None for a runtime without one (an artifact from before the workflow wrote it)."""
+    if runtime.is_dir():
+        path = runtime.parent/RUNTIME_COMMIT
+        data = path.read_bytes() if path.is_file() else None
+    else:
+        with zipfile.ZipFile(runtime) as z:
+            beside = zipped_app(z, runtime)[:-1].rpartition('/')[0]
+            name = f'{beside}/{RUNTIME_COMMIT}' if beside else RUNTIME_COMMIT
+            data = z.read(name) if name in z.namelist() else None
+    if data is None:
+        return None
+    commit = data.decode('ascii', 'replace').strip()
+    require(re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', commit), f'{runtime}: {RUNTIME_COMMIT} names no commit ({commit[:80]!r})')
+    return commit
+
+
+def source_commit(given, runtime):
+    """TOTKSourceCommit and where it comes from: --source-commit, else the runtime's TOTK-runtime.commit, else this
+    checkout's HEAD, with a warning, as HEAD is the runtime's commit only while the checkout has not moved since the run."""
+    if given:
+        return given, '--source-commit'
+    commit = runtime_commit(runtime)
+    if commit:
+        return commit, RUNTIME_COMMIT
+    head = git_commit()
+    print(f'  warning: {runtime.name} does not name the commit it was built from (no {RUNTIME_COMMIT} beside its .app); '
+          f'TOTKSourceCommit is this checkout\'s HEAD, {head}, which is wrong if the checkout has moved since the workflow '
+          'run: give --source-commit <the commit the run built>')
+    return head, 'checkout HEAD'
+
+
 def arguments():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('runtime', type=Path, help='the ios-runtime workflow\'s TOTK-runtime.zip, or the TOTK.app folder in it')
@@ -233,7 +275,8 @@ def arguments():
     p.add_argument('--app-name', help='default: the old app\'s CFBundleDisplayName')
     p.add_argument('--short-version', help='CFBundleShortVersionString (default: the old app\'s)')
     p.add_argument('--bundle-version', help='CFBundleVersion (default: the old app\'s)')
-    p.add_argument('--source-commit', help='the commit the runtime was built from (default: this checkout\'s HEAD)')
+    p.add_argument('--source-commit', help='the commit the runtime was built from (default: the runtime\'s '
+                   f'{RUNTIME_COMMIT}, else this checkout\'s HEAD)')
     p.add_argument('--layout', type=Path, default=LAYOUT, help=f'the section layout (default: ios/ci/{LAYOUT.name})')
     p.add_argument('--unsigned-only', action='store_true', help='write <name>-unsigned.ipa only')
     p.add_argument('--keep-staging', action='store_true', help='keep the staging folder (<dir>/.<name>.staging)')
@@ -277,11 +320,14 @@ def assemble(a, runtime, tree, app, old_app, old_info, identity):
             shutil.copyfile(icon, app/icon.name)
     if not (app/'default.metallib').exists() and (old_app/'default.metallib').is_file():
         shutil.copyfile(old_app/'default.metallib', app/'default.metallib')   # Xcode's library of the .metal sources
-    build = {'source_commit': a.source_commit or git_commit(), 'date': datetime.date.today().isoformat()}
+    commit, commit_from = source_commit(a.source_commit, runtime)
+    print(f'  source commit: {commit} ({commit_from})')
+    build = {'source_commit': commit, 'date': datetime.date.today().isoformat()}
     info = app_info(runtime_info, old_info, identity, with_icons, build)
     (app/'Info.plist').write_bytes(plistlib.dumps(info, fmt=plistlib.FMT_BINARY))
     return dict(runtime=str(runtime), executable=exe_name, executable_sha256=digest(exe),
-                sections={f'{n}.{p}': s for n, p, s in filled}, shader_chain=runtime_chain(exe), source_commit=build['source_commit'],
+                sections={f'{n}.{p}': s for n, p, s in filled}, shader_chain=runtime_chain(exe), source_commit=commit,
+                source_commit_from=commit_from,
                 info_from_old_app=sorted(k for k in info if k not in runtime_info and k not in identity),
                 info={k: info.get(k) for k in ('CFBundleIdentifier', 'CFBundleShortVersionString', 'CFBundleVersion',
                                                'CFBundleDisplayName', 'MinimumOSVersion', 'DTSDKName')})
