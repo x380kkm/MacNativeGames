@@ -12,7 +12,7 @@ targets:
     platform: iOS
     sources:
       - Sources
-      - Settings.bundle   # the Settings app pane (game language picker); stored in NSUserDefaults, applied in main.m
+      - Settings.bundle   # the Settings app pane; stored in NSUserDefaults, applied in main.m (motion: Sources/motion_input.m)
       - path: ../runtime
         excludes:
           - frontend.m
@@ -23,6 +23,8 @@ targets:
       - path: Gen/embed.S
       - path: ../runtime/loader.c
         compilerFlags: "-Dmain=totk_host_main"
+    dependencies:
+      - sdk: CoreMotion.framework   # the device's gyro (Sources/motion_input.m)
     info:
       path: Sources/Info.plist
       properties:
@@ -44,6 +46,7 @@ targets:
         GCSupportsControllerUserInteraction: true
         GCSupportedGameControllers:
           - ProfileName: ExtendedGamepad
+        NSMotionUsageDescription: "使用设备陀螺仪控制游戏中的体感瞄准。"
         CADisableMinimumFrameDurationOnPhone: true
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false

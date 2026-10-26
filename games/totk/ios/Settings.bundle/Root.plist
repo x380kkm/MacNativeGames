@@ -104,6 +104,48 @@
 			<key>Type</key>
 			<string>PSGroupSpecifier</string>
 			<key>Title</key>
+			<string>體感 · Motion</string>
+			<key>FooterText</key>
+			<string>回到遊戲後生效；遊戲選項裡也要開啟體感瞄準。自動：有體感資料的手把優先，否則用本機陀螺儀。「反轉上下」只用於本機陀螺儀 · takes effect when you return to the game; motion aiming must also be on in the game's options. Auto: a controller with motion data first, else the device's own gyro. The up/down inversion is for the device's gyro only</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSMultiValueSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_MOTION_SOURCE</string>
+			<key>Title</key>
+			<string>體感來源 · Motion source</string>
+			<key>DefaultValue</key>
+			<string>auto</string>
+			<key>Values</key>
+			<array>
+				<string>auto</string>
+				<string>controller</string>
+				<string>device</string>
+				<string>off</string>
+			</array>
+			<key>Titles</key>
+			<array>
+				<string>自動 · Auto</string>
+				<string>手把 · Controller</string>
+				<string>本機陀螺儀 · Device</string>
+				<string>關閉 · Off</string>
+			</array>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_DEVICE_GYRO_INVERT_PITCH</string>
+			<key>Title</key>
+			<string>反轉本機體感上下 · Invert device up/down</string>
+			<key>DefaultValue</key>
+			<true/>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+			<key>Title</key>
 			<string>除錯 · Debug</string>
 			<key>FooterText</key>
 			<string>開啟後把日誌寫進 App 的 Documents/log.txt（在 Mac 上讀取），會稍微影響效能；關閉時不記錄任何日誌。重新啟動遊戲後生效 · writes Documents/log.txt for reading on a Mac (slightly slower); off records nothing. Takes effect after relaunching the game</string>

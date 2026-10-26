@@ -12,6 +12,7 @@
 #include "runtime.h"
 #include "dmsh_chain.h"
 #import "touch_pad.h"
+#import "motion_input.h"
 
 int totk_host_main(int argc, char **argv);
 void runtime_ios_attach_layer(CAMetalLayer *layer, UIView *host);
@@ -139,6 +140,7 @@ void runtime_settings_toggle(void) {}
     fprintf(stderr, "[totk-audio] audio session category=%s active=%d route=%s err=%s%s\n",
             audio.category.UTF8String ?: "?", (int)activated, audio.currentRoute.outputs.firstObject.portType.UTF8String ?: "?",
             catErr ? catErr.localizedDescription.UTF8String : "none", actErr ? actErr.localizedDescription.UTF8String : "");
+    runtime_ios_motion_start(self.gameView);   // motion aiming from the device's gyro or a controller (Sources/motion_input.m)
     pthread_attr_t attr; pthread_attr_init(&attr); pthread_attr_setstacksize(&attr, 64u << 20);
     pthread_t thread; pthread_create(&thread, &attr, run_host, NULL);
     pthread_detach(thread); pthread_attr_destroy(&attr);
