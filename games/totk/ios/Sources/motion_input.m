@@ -24,8 +24,10 @@
    motion live, which starts the fusion over. The settings are read again when the app becomes active and when a
    controller connects or disconnects; while the app is inactive the sensors are off. Handlers of an earlier setup
    carry an older generation and are ignored. Nothing starts when the game has no six-axis sensor in the run
-   (TOTK_GYRO=0, runtime/hid_feedback.c). Log lines "[ios-gyro]": the setup, each source's first sample, and one
-   sample every 30 s. visionOS: no motion from here. */
+   (runtime_gyro_enabled, runtime/hid_feedback.c): TOTK_GYRO=0, or an agent's test session (TOTK_SLOT_OWNER claude /
+   codex in the launch environment, which main.m keeps) without TOTK_GYRO=1. gyro.txt counts only when the launch
+   environment names a TOTK_CONTROLS; the app sets none. Log lines "[ios-gyro]": the setup, each source's first sample,
+   and one sample every 30 s. visionOS: no motion from here. */
 #import "motion_input.h"
 #include <TargetConditionals.h>
 
@@ -203,7 +205,7 @@ static BOOL sample_usable(const double acc[3], const double gyro[3]) {
 void runtime_ios_motion_start(UIView *view) {
     static TOTKMotionInput *input;
     if (input) return;
-    if (!runtime_gyro_enabled()) { fprintf(stderr, "[ios-gyro] the game has no six-axis sensor in this run (TOTK_GYRO=0): no motion\n"); return; }
+    if (!runtime_gyro_enabled()) { fprintf(stderr, "[ios-gyro] the game has no six-axis sensor in this run (TOTK_GYRO=0, or an agent's test session, TOTK_SLOT_OWNER claude / codex, without TOTK_GYRO=1): no motion\n"); return; }
     const char *axes = getenv("TOTK_GYRO_AXES");
     int remap = runtime_motion_axes(axes);
     if (remap < 0) runtime_fail("TOTK_GYRO_AXES must name x, y and z once each, e.g. \"-x,y,-z\"");

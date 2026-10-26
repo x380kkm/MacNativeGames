@@ -103,5 +103,55 @@ class FullHD(unittest.TestCase):
         self.assertIn("'      - path: Gen/Settings.bundle'", build)
 
 
+class MotionSettings(unittest.TestCase):
+    """Settings › Motion (Sources/motion_input.m): the keys, values and defaults of the 1.4.3 iPad build of 2026-10-22, so
+    a player's choices keep their meaning. The code reads the same keys, accepts the same words, falls back to and
+    registers the same defaults, and Breath of the Wild's pane, which loses the Full HD group (build_ipa.py), keeps the
+    motion group. Other groups may come and go: nothing here counts them or depends on where they are."""
+    def test_pane_and_code_agree_and_botw_keeps_the_group(self):
+        import plistlib, re
+        ios = TOOLS.parent
+        specs = plistlib.loads((ios/'Settings.bundle/Root.plist').read_bytes())['PreferenceSpecifiers']
+        def one(key):
+            found = [s for s in specs if s.get('Key') == key]
+            self.assertEqual(len(found), 1, key)
+            return found[0]
+        source, invert = one('TOTK_MOTION_SOURCE'), one('TOTK_DEVICE_GYRO_INVERT_PITCH')
+        self.assertEqual(source['Type'], 'PSMultiValueSpecifier')
+        self.assertEqual(source['Values'], ['auto', 'controller', 'device', 'off'])
+        self.assertEqual(len(source['Titles']), len(source['Values']))
+        self.assertEqual(source['DefaultValue'], 'auto')
+        self.assertEqual(invert['Type'], 'PSToggleSwitchSpecifier')
+        self.assertIs(invert['DefaultValue'], True)
+
+        code = (ios/'Sources/motion_input.m').read_text(encoding='utf-8')
+        names = dict(re.findall(r'\b(k\w+Key) = @"(\w+)"', code))
+        self.assertEqual(names, {'kSourceKey': 'TOTK_MOTION_SOURCE', 'kInvertKey': 'TOTK_DEVICE_GYRO_INVERT_PITCH'})
+        self.assertIn('stringForKey:kSourceKey', code)
+        self.assertIn('boolForKey:kInvertKey', code)
+        accepted = re.search(r'@\[([^\]]*)\] containsObject:mode\] \? mode : @"(\w+)"', code)
+        self.assertTrue(accepted)
+        self.assertEqual(re.findall(r'@"(\w+)"', accepted.group(1)), source['Values'])
+        self.assertEqual(accepted.group(2), source['DefaultValue'])   # anything else counts as the default
+        registered = re.search(r'registerDefaults:@\{([^}]*)\}\]', code)
+        self.assertTrue(registered)
+        defaults = {names[key]: word if flag == '' else flag == 'YES'
+                    for key, word, flag in re.findall(r'(k\w+Key): @(?:"(\w*)"|(YES|NO))', registered.group(1))}
+        self.assertEqual(defaults, {'TOTK_MOTION_SOURCE': source['DefaultValue'],
+                                    'TOTK_DEVICE_GYRO_INVERT_PITCH': invert['DefaultValue']})
+
+        # Breath of the Wild: build_ipa.py takes out the Full HD switch and the group in front of it.
+        self.assertIn('del specs[at-1:at+1]', (TOOLS/'build_ipa.py').read_text(encoding='utf-8'))
+        botw = list(specs)
+        at = next(i for i, s in enumerate(botw) if s.get('Key') == 'TOTK_DOCKED')
+        del botw[at - 1:at + 1]
+        keys = [s.get('Key') for s in botw]
+        self.assertNotIn('TOTK_DOCKED', keys)
+        first, last = keys.index('TOTK_MOTION_SOURCE'), keys.index('TOTK_DEVICE_GYRO_INVERT_PITCH')
+        self.assertEqual(botw[first - 1]['Type'], 'PSGroupSpecifier')   # the motion group's heading is still there
+        self.assertLess(first, last)
+        self.assertFalse([s for s in botw[first:last] if s['Type'] == 'PSGroupSpecifier'])   # both rows in that group
+
+
 if __name__ == '__main__':
     unittest.main()
