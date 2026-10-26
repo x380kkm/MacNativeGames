@@ -25,12 +25,13 @@ def section_names(name):
 
 def write_outputs(out, asm, entries):
     """embed.S, ios_embed.h beside it, and the linker flags on stdout."""
-    out.write_text('\n'.join(asm)+'\n')
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text('\n'.join(asm)+'\n', newline='\n')
     header = ['/* Generated locally; hashes bind app contents to the verified rewrites. */',
               'typedef struct { const char *name, *x0, *w, *x1; } IosEmbed;', 'static const IosEmbed ios_embed[] = {']
     header += [f'{{"{e["name"]}","{e["x0"]}","{e["w"]}","{e["x1"]}"}},' for e in entries]
     header += ['};']
-    (out.parent/'ios_embed.h').write_text('\n'.join(header)+'\n')
+    (out.parent/'ios_embed.h').write_text('\n'.join(header)+'\n', newline='\n')
     flags = [f'-Wl,-segprot,__TOTK{e["name"]}W,rw,rw' for e in entries] + ['-Wl,-segprot,__TOTKX,r-x,r-x']
     print(' '.join(flags))
 
@@ -68,7 +69,7 @@ def embed_modules(root, out, names, text_dir):
                 if len(x1_data) != hi - lo: raise ValueError(f'{name}: exported x1 must be exactly {hi - lo:#x} bytes, got {len(x1_data):#x}')
                 section_image, chunk_source, lo, hi = x1_export, x1_data, 0, hi - lo
             real = max(0, min(hi, len(chunk_source))-lo)
-            if real: asm += [f'    .incbin "{section_image.resolve()}", {lo:#x}, {real:#x}']
+            if real: asm += [f'    .incbin "{section_image.resolve().as_posix()}", {lo:#x}, {real:#x}']
             if hi-lo > real: asm += [f'    .space {hi-lo-real:#x}']
             asm += ['    .p2align 14']
             chunk=chunk_source[lo:min(hi,len(chunk_source))] if lo < len(chunk_source) else b''
@@ -100,19 +101,23 @@ def write_layout(sections, out, names):
             if not data or len(data) % PG: raise ValueError(f'{name}.{part}.bin: {len(data):#x} bytes is not a positive multiple of {PG:#x}')
             m[part] = {'size': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
         modules.append(m)
-    out.write_text(json.dumps({'modules': modules}, indent=2)+'\n')
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps({'modules': modules}, indent=2)+'\n', newline='\n')
 
-args = sys.argv[1:]
-if args and args[0] == '--layout':
-    embed_placeholders(Path(args[1]), Path(args[2]))
-elif args and args[0] == '--layout-of':
-    write_layout(Path(args[1]), Path(args[2]), args[3:])
-else:
-    root, out = Path(args[0]), Path(args[1])
-    args = args[2:]
-    text_dir = None
-    if '--text-dir' in args:
-        i = args.index('--text-dir')
-        text_dir = Path(args[i + 1])
-        del args[i:i + 2]
-    embed_modules(root, out, args, text_dir)
+def main(args):
+    if args and args[0] == '--layout':
+        embed_placeholders(Path(args[1]), Path(args[2]))
+    elif args and args[0] == '--layout-of':
+        write_layout(Path(args[1]), Path(args[2]), args[3:])
+    else:
+        root, out = Path(args[0]), Path(args[1])
+        args = args[2:]
+        text_dir = None
+        if '--text-dir' in args:
+            i = args.index('--text-dir')
+            text_dir = Path(args[i + 1])
+            del args[i:i + 2]
+        embed_modules(root, out, args, text_dir)
+
+if __name__ == '__main__':
+    main(sys.argv[1:])
