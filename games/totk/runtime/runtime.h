@@ -27,10 +27,10 @@ void *runtime_codec_override(const char *name);
 void *runtime_movie_override(const char *name);   /* runtime/movie_host.c: movie::Decoder for VP9 cutscenes */
 void *runtime_time_override(const char *name);
 void *runtime_applet_override(const char *name);
-void *runtime_swkbd_override(const char *name);   /* runtime/swkbd_host.c: nn::swkbd text entry with the Mac keyboard */
+void *runtime_swkbd_override(const char *name);   /* runtime/swkbd_host.c: nn::swkbd text entry (runtime_front_text_input) */
 void runtime_swkbd_probe(void);
-void runtime_swkbd_selftest(void);
-void runtime_dump_threads(void);   /* threads.c: every guest thread's wait state and guest return chain (TOTK_INPUT_FILE "threads") */   /* diagnostic "kbtest": show the text entry bar from a thread of its own */
+void runtime_swkbd_selftest(void);   /* diagnostic "kbtest": show the text entry bar or box from a thread of its own */
+void runtime_dump_threads(void);   /* threads.c: every guest thread's wait state and guest return chain (TOTK_INPUT_FILE "threads") */
 void runtime_frame_step_pin(double ms);                  /* game_patches.c: pin the real-time frame step (diagnostics), 0 = real time */
 void runtime_frame_step_update(uint64_t now_ns);
 void runtime_thread_note_hle(unsigned index);            /* threads.c: the calling guest thread's last host call (hletrace) */
@@ -38,11 +38,13 @@ uint32_t runtime_thread_current_handle(void);            /* threads.c: handle of
 void *runtime_hle_wrap_named(void *fn, const char *name);/* hle_stack.c: runtime_hle_wrap with a name for diagnostics */
 void runtime_hle_trace_set(int mode);                    /* hle_stack.c: 1 count host calls, 2 also log the first call of each, 0 stop and print */
 void runtime_hle_describe(unsigned index, char *out, size_t cap);   /* hle_stack.c: readable name of a host-call wrapper */
-/* Text entry bar in the game window (runtime/frontend.m, Mac): the player types on the keyboard, Return confirms (1, the text
-   as UTF-8 in out), Escape cancels (0). The caller waits; give the virtual core up around it (runtime_core_away). */
-typedef struct { const char *prompt, *initial; int max_units, min_units, secure, digits_only; uint32_t disabled; } RuntimeTextRequest;
+/* Text entry: a bar in the game window on the Mac (runtime/frontend.m: the keyboard types, Return confirms, Escape cancels), a
+   box over the game on the iPhone / iPad (runtime/frontend_ios.m: the on-screen or a hardware keyboard, OK or Return
+   confirms, Cancel or Escape cancels). Confirmed: 1, the text as UTF-8 in out; cancelled: 0. The caller waits; give the
+   virtual core up around it (runtime_core_away). prompt is title, then " — " and detail when detail is not empty. */
+typedef struct { const char *prompt, *initial; int max_units, min_units, secure, digits_only; uint32_t disabled; const char *title, *detail; } RuntimeTextRequest;
 int runtime_front_text_input(const RuntimeTextRequest *req, char *out, size_t out_size);
-void runtime_front_text_test(const char *op, const char *text);   /* diagnostics: "type" text, "enter", "esc" into the open bar */
+void runtime_front_text_test(const char *op, const char *text);   /* diagnostics: "type" text, "enter", "esc", "shot" <png path> on the open bar or box */
 int runtime_core_away(void);          /* runtime/threads.c: a guest thread gives its virtual core up around a long host wait */
 void runtime_core_back(int *away);
 void runtime_spin_wait(unsigned module, uint64_t head);   // threads.c: a pass of a gated spin wait (loader.c runtime_dispatch)

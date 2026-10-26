@@ -1,10 +1,17 @@
-/* Text entry for the game (nn::swkbd::ShowKeyboard) with the Mac keyboard.
+/* Text entry for the game (nn::swkbd::ShowKeyboard) with the player's keyboard.
 
    On the Switch the call starts the software-keyboard library applet, which takes the screen until the player confirms
    or cancels. Here the player types on the Mac keyboard in a bar inside the game window (runtime_front_text_input in
    runtime/frontend.m; input methods work, Return confirms, Escape cancels). User, 2026-10-17: "no software keyboard,
-   just support the user's keyboard". TOTK calls it in one place: naming a horse (main+0x1e5cb58 -> main+0x1adb720:
-   user-name preset, at most 9 characters, '@' '%' '\' disabled, UTF-16 output; an empty name counts as cancelled).
+   just support the user's keyboard". On the iPhone, iPad and Vision Pro the same request opens a box over the game
+   (runtime/frontend_ios.m: the on-screen or a hardware keyboard, OK or Return confirms, Cancel or Escape cancels); before
+   2026-10-26 those cancelled every request without showing anything, so a horse could never be named there.
+   TOTK calls it in one place: naming a horse (main+0x1e5cb58 -> main+0x1adb720: user-name preset, at most 9 characters,
+   '@' '%' '\' disabled, UTF-16 output; an empty name counts as cancelled). In 1.4.3 it is main+0x253db84 ->
+   main+0x2195910 -> main+0x2195870 -> the PLT stub, with preset 2, mode 8, at most 9 characters, disabled keys 0x2c, a
+   16-unit name buffer and no header, guide or initial text. There a result other than 0 and an empty name take the same
+   branch (no name stored), and the step ends either way without calling again. 1.4.3's SDK keeps the work buffer at
+   +0x518 / +0x520 of the argument, not at ARG_WORK, so its initial text would not be read (TOTK sets none).
 
    ABI of TOTK 1.0.0's SDK, read from the original sdk+0x3cbd40 (ShowKeyboard with a trigger) and the setters
    MakePreset / SetHeaderText / SetSubText / SetGuideText / SetOkText / SetInitialText (analysis/swkbd/sdk-swkbd-named.c):
@@ -14,7 +21,8 @@
    close result). The disabled-key bits follow the applet's: 1 space, 2 '@', 3 '%', 4 '/', 5 '\', 6 digits (7 download
    code and 8 user name are character sets the applet knows; not applied here).
 
-   TOTK_SWKBD_ANSWER=<text> answers without showing the bar (tests; "<cancel>" cancels, "<initial>" keeps the initial text).
+   TOTK_SWKBD_ANSWER=<text> answers without showing the bar or box (tests; "<cancel>" cancels, "<initial>" keeps the
+   initial text).
    make probe-swkbd builds the arguments with the guest SDK and calls through main's own PLT stub. */
 #include "runtime.h"
 #include "totk_ui_lang.h"
@@ -126,9 +134,12 @@ static unsigned show_keyboard(void *out_string, const void *arg_ptr) {
     int32_t init_off = (int32_t)rd32(arg + KB_INIT_OFF), init_len = (int32_t)rd32(arg + KB_INIT_LEN);
     if (init_len > 0 && work && init_off >= 0 && (uint64_t)init_off + (uint64_t)init_len * 2 <= work_size)
         utf16_to_utf8((const uint16_t *)(uintptr_t)(work + (uint64_t)init_off), (size_t)(init_len > KB_LIMIT ? KB_LIMIT : init_len), initial, sizeof initial);
+    /* The prompt's two parts: the game's header (else its guide or sub text, else a default), and under a header its guide
+       or sub text. The Mac bar shows them joined; the iOS box shows them as its title and message. */
+    const char *title = *header ? header : *guide ? guide : *sub ? sub : TOTK_UI("输入文字","Enter text");
+    const char *detail = *header ? (*guide ? guide : sub) : "";
     char prompt[sizeof header + sizeof guide + 8];
-    snprintf(prompt, sizeof prompt, "%s%s%s", *header ? header : *guide ? guide : *sub ? sub : TOTK_UI("输入文字","Enter text"),
-             *header && (*guide || *sub) ? " — " : "", *header ? (*guide ? guide : sub) : "");
+    snprintf(prompt, sizeof prompt, "%s%s%s", title, *detail ? " — " : "", detail);
 
     char text[KB_LIMIT * 4 + 1] = ""; int confirmed = 0;
     const char *forced = getenv("TOTK_SWKBD_ANSWER");
@@ -136,8 +147,8 @@ static unsigned show_keyboard(void *out_string, const void *arg_ptr) {
         confirmed = strcmp(forced, "<cancel>") != 0;
         snprintf(text, sizeof text, "%s", strcmp(forced, "<initial>") ? forced : initial);
     } else {
-#if TARGET_OS_OSX
-        RuntimeTextRequest req = { prompt, initial, max_len, min_len, password != 0, type == KB_TYPE_NUMPAD, disabled };
+#if TARGET_OS_OSX || TARGET_OS_IOS || TARGET_OS_VISION
+        RuntimeTextRequest req = { prompt, initial, max_len, min_len, password != 0, type == KB_TYPE_NUMPAD, disabled, title, detail };
         int away = runtime_core_away();   /* the other guest threads keep running while the player types */
         confirmed = runtime_front_text_input(&req, text, sizeof text);
         runtime_core_back(&away);
@@ -174,7 +185,7 @@ void *runtime_swkbd_override(const char *name) {
 
 /* Diagnostic command "kbtest" (TOTK_INPUT_FILE, runtime/input.c): asks for text the way TOTK names a horse (user-name
    limits: 9 characters, '@' '%' '\' disabled), on a thread of its own so that "kbtype" / "kbenter" / "kbesc" can answer
-   the bar while it waits. Logs what the game would get. */
+   the bar or box while it waits. Logs what the game would get. */
 static void *selftest_thread(void *unused) {
     (void)unused;
     uint8_t *arg = calloc(1, ARG_SIZE); uint16_t *out = calloc(1, 0x7d4); uint8_t *work = calloc(1, 0x1000);
