@@ -104,6 +104,36 @@
 			<key>Type</key>
 			<string>PSGroupSpecifier</string>
 			<key>Title</key>
+			<string>大貼圖 · Large textures</string>
+			<key>FooterText</key>
+			<string>省記憶體：大貼圖少存最高一級 mip，遊戲按位置讀取、渲染或複製的除外，近處可能稍模糊。保留更多級：另外保留著色器按指定級取樣的貼圖，記憶體用量較多。完整：所有貼圖保留全部級，記憶體用量最高。重新啟動遊戲後生效 · Save memory: large textures leave out their top mip level, except those the game reads by position, renders into or copies; close-up detail may be a little softer. Keep more levels: also keeps the textures a shader samples at a chosen level, using more memory. Full: every texture keeps every level, using the most memory. Takes effect after relaunching the game</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSMultiValueSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_LARGE_TEXTURES</string>
+			<key>Title</key>
+			<string>大貼圖 · Large textures</string>
+			<key>DefaultValue</key>
+			<string>save</string>
+			<key>Values</key>
+			<array>
+				<string>save</string>
+				<string>more</string>
+				<string>full</string>
+			</array>
+			<key>Titles</key>
+			<array>
+				<string>省記憶體 · Save memory</string>
+				<string>保留更多級 · Keep more levels</string>
+				<string>完整 · Full</string>
+			</array>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+			<key>Title</key>
 			<string>體感 · Motion</string>
 			<key>FooterText</key>
 			<string>回到遊戲後生效；遊戲選項裡也要開啟體感瞄準。自動：有體感資料的手把優先，否則用本機陀螺儀。「反轉上下」只用於本機陀螺儀 · takes effect when you return to the game; motion aiming must also be on in the game's options. Auto: a controller with motion data first, else the device's own gyro. The up/down inversion is for the device's gyro only</string>

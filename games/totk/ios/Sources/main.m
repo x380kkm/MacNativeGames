@@ -301,6 +301,14 @@ static void audio_observe(void) {
     // Frame rate: Settings.bundle › TOTK_PHONE_FPS, or the 60 / 30 button of the touch controls, which saves it here too.
     NSString *fps = [NSUserDefaults.standardUserDefaults stringForKey:@"TOTK_PHONE_FPS"];
     if ([fps isEqualToString:@"30"]) setenv("TOTK_PHONE_FPS","30",0);
+    /* Large textures: Settings.bundle › TOTK_LARGE_TEXTURES, how the Metal copies of large mipmapped textures are kept
+       (d2r_gfx nvn_mtl.m mip_drop_of, mip_keep_mode). "save" (default) sets nothing: the top level is left out except
+       where a copy one level smaller answers wrongly (TOTK_MIP_KEEP=1); "more" also keeps the textures a shader samples at
+       an explicit level (TOTK_MIP_KEEP=2); "full" keeps every level of every texture (TOTK_MIP_DROP=0). overwrite=0 as
+       for the language. */
+    NSString *large = [NSUserDefaults.standardUserDefaults stringForKey:@"TOTK_LARGE_TEXTURES"];
+    if ([large isEqualToString:@"more"]) setenv("TOTK_MIP_KEEP","2",0);
+    else if ([large isEqualToString:@"full"]) setenv("TOTK_MIP_DROP","0",0);
     setenv("TOTK_ROMFS_PATCHES",[res stringByAppendingPathComponent:@"romfs-patches"].fileSystemRepresentation,1);
     setenv("TOTK_ROMFS_PATCHES_OUT",[res stringByAppendingPathComponent:@"romfs-patches-out"].fileSystemRepresentation,1);
     setenv("TOTK_SHARED_FONTS",[res stringByAppendingPathComponent:@"shared-fonts"].fileSystemRepresentation,1);

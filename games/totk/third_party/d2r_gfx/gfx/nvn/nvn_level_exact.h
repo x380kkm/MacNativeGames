@@ -1,10 +1,15 @@
-// Which sampled textures of a translated shader need every level of their texture (TOTK #337).
+// Which sampled textures of a translated shader need every level of their texture.
 // On iPhone and iPad the Metal copy of a large mipmapped CPU-pool texture leaves out its top level (nvn_mtl.m
 // mip_drop_of). A copy one level smaller is drawn correctly when the GPU picks the level from the screen footprint, as
-// fragment shaders sampling with an implicit level do. It is wrong when the shader names texels or levels itself:
+// fragment shaders sampling with an implicit level do (close up, where the game's level 0 would be picked, it is one
+// level blurrier). It is wrong when the shader names texels or levels itself: the copy answers with the game's level 1
+// at level 0, half the size, so a lookup by texel position reads other data. Mode NVN_LEVEL_EXACT_TEXELS finds
 // texelFetch (MSL read), textureGather (gather, spvGatherConstOffsets), textureSize and textureQueryLevels (get_width,
-// get_height, get_depth, get_num_mip_levels), and sampling at an explicit level (mode NVN_LEVEL_EXACT_LEVELS). The
-// copy then answers with the game's level 1 at level 0, half the size, so a lookup by texel position reads other data.
+// get_height, get_depth, get_num_mip_levels). Mode NVN_LEVEL_EXACT_LEVELS also finds sampling at an explicit level and
+// textureQueryLod (calculate_clamped_lod, calculate_unclamped_lod), whose answer counts the levels of the smaller copy;
+// in a 1.4.3 shader seed of 22,698 shaders, each of the 2,519 fragment texture bindings whose level is queried is also
+// sampled at an explicit level.
+// Suspected cause of the false Gloom around Link in the Depths (TOTK #337), not confirmed on a device.
 // Plain C, so tests can run it on the MSL of a shader seed without Metal.
 #pragma once
 #include <stddef.h>
@@ -22,11 +27,20 @@ static inline const char *nvn_msl_call_end(const char *open) {
     return NULL;
 }
 
+/* 1 when the text at q starts with one of the n call names ("<method>("). */
+static inline int nvn_msl_call_in(const char *q, const char *const *calls, size_t n) {
+    for (size_t i = 0; i < n; i++)
+        if (!strncmp(q, calls[i], strlen(calls[i]))) return 1;
+    return 0;
+}
+
 /* 1 when the MSL accesses the argument-buffer texture `name` (spirv-cross writes spvDescriptorSet0.<name>) by texel
    position, gathers it or asks for its size or level count; with mode NVN_LEVEL_EXACT_LEVELS also when it samples it
-   at an explicit level. A name too long for the pattern buffer counts as such an access (the texture keeps its levels). */
+   at an explicit level or asks for the level it would sample. A name too long for the pattern buffer counts as such an
+   access (the texture keeps its levels). */
 static inline int nvn_msl_level_exact(const char *src, const char *name, int mode) {
     static const char *const texel_calls[] = {"read(", "gather(", "get_width(", "get_height(", "get_depth(", "get_num_mip_levels("};
+    static const char *const lod_calls[] = {"calculate_clamped_lod(", "calculate_unclamped_lod("};   // textureQueryLod
     static const char gather_helper[] = "spvGatherConstOffsets(";   // textureGatherOffsets: spirv-cross passes the texture to this helper
     if (!src || !name || !*name || mode <= NVN_LEVEL_EXACT_OFF) return 0;
     char pat[128];
@@ -43,9 +57,10 @@ static inline int nvn_msl_level_exact(const char *src, const char *name, int mod
         if (*q == ')') q++;   // spvDepthCast(spvDescriptorSet0.<name>).<member>(...)
         if (*q != '.') continue;   // another member whose name starts with this one (<name>Smplr)
         q++;
-        for (size_t i = 0; i < sizeof texel_calls / sizeof *texel_calls; i++)
-            if (!strncmp(q, texel_calls[i], strlen(texel_calls[i]))) return 1;
-        if (mode >= NVN_LEVEL_EXACT_LEVELS && !strncmp(q, "sample", 6)) {   // sample( and sample_compare(
+        if (nvn_msl_call_in(q, texel_calls, sizeof texel_calls / sizeof *texel_calls)) return 1;
+        if (mode < NVN_LEVEL_EXACT_LEVELS) continue;
+        if (nvn_msl_call_in(q, lod_calls, sizeof lod_calls / sizeof *lod_calls)) return 1;
+        if (!strncmp(q, "sample", 6)) {   // sample( and sample_compare(
             const char *open = strchr(q, '('), *end = open ? nvn_msl_call_end(open) : NULL;
             if (end) for (const char *c = open; c < end; c++) if (!strncmp(c, "level(", 6)) return 1;
         }
