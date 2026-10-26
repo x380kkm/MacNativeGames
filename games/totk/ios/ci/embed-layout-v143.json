@@ -1,0 +1,49 @@
+{
+  "modules": [
+    {
+      "name": "main",
+      "x0": {
+        "size": 45858816,
+        "sha256": "01df600a0d1da3d56bafbd33cf26a843067e4e9c568d2655e5644d21652b228a"
+      },
+      "w": {
+        "size": 15941632,
+        "sha256": "2c10022fd1d89785ec620f695ca4acd1d7d1feae20e9622b73ea521670100e5a"
+      },
+      "x1": {
+        "size": 10502144,
+        "sha256": "9406ec53f3d778d426f7f198cda53eb37046994c2dcd12a674fa034bb9a142d2"
+      }
+    },
+    {
+      "name": "subsdk0",
+      "x0": {
+        "size": 3506176,
+        "sha256": "70f014733c7d72aefbf4ec8461948ef697ee174805420a1f35c60726d69b3b15"
+      },
+      "w": {
+        "size": 3244032,
+        "sha256": "0abf7c6f9e4c883b24db896b3e7ade3d555a1e0e95f102501724051ee5932f6a"
+      },
+      "x1": {
+        "size": 409600,
+        "sha256": "1f3d3b15b14e2eeb5eca16b0d18c3d5c1b6498b9fa3fb7d38573db99ef2d4fa7"
+      }
+    },
+    {
+      "name": "sdk",
+      "x0": {
+        "size": 6701056,
+        "sha256": "0b78c4a70546f5f4d800934439ac4fadd17bfc394301ff3945499d464e0501d9"
+      },
+      "w": {
+        "size": 6275072,
+        "sha256": "cdc7754ef82d594a6989c00b533766631017f2ef71f575ef4fd28986218f6769"
+      },
+      "x1": {
+        "size": 1441792,
+        "sha256": "63c334048e97ff6cd0194af2c56638e08eaf70725bd1ed23731713f4ef9caa41"
+      }
+    }
+  ]
+}

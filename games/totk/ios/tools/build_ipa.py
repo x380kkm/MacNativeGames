@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """Build an unsigned, sideloadable iPhone/iPad IPA from a prepared work tree: Tears of the Kingdom (v0, v112, v121, v143)
 or Breath of the Wild (botw160, botw190; the runtime and graphics layer built with GAME_BOTW, game_patches_botw.c, its own
-shader list and the add-on content beside the RomFS)."""
-import argparse, json, os, plistlib, shutil, subprocess, sys, time
+shader list and the add-on content beside the RomFS).
+
+--runtime-only --embed-layout <layout.json> builds only the app's executable and its own files, from this repository alone:
+the module sections are zero-filled to the layout's sizes and carry its hashes (gen_embed.py --layout), and no game data,
+shader seed or icon goes in. The tree is then games/totk itself, and the output a .app folder; the module bytes are
+written into the executable on the machine that holds them (.github/workflows/ios-runtime.yml)."""
+import argparse, hashlib, json, os, plistlib, shutil, subprocess, sys, time
 from pathlib import Path
 from compile_seed import METAL_FLAGS
 from xcode_dir import developer_dir
@@ -67,14 +72,43 @@ def seed_reusable(seed, source_hash, source_files, sdk):
             cached.get('ios_metal_flags')==' '.join(METAL_FLAGS) and
             all((seed/(name.removesuffix('.metal')+'.metallib')).is_file() for name in shaders))
 
+def prepare_seed(tree,ios,gen,version,sdk_name,logs,env):
+    """The work tree's verified shader seed in Gen/totk/shader-seed with its Metal libraries and file list; returns the
+    work tree's seed folder and that copy."""
+    seed_src=tree/f'build/shader-seed/{version}'; seed=gen/'totk/shader-seed'
+    if not (seed_src/'seed-manifest.json').is_file(): raise RuntimeError(f'missing verified shader seed: {seed_src}')
+    source_manifest_hash=hashlib.sha256((seed_src/'seed-manifest.json').read_bytes()).hexdigest()
+    reuse_seed=seed_reusable(seed,source_manifest_hash,json.loads((seed_src/'seed-manifest.json').read_text())['files'],sdk_name)
+    if not reuse_seed:
+        if seed.exists(): shutil.rmtree(seed)
+        copy_tree(seed_src,seed)
+        run([sys.executable,ios/'tools/compile_seed.py',seed,sdk_name],tree,logs/f'{sdk_name}-shaders.log',env)
+    seed_manifest=json.loads((seed/'seed-manifest.json').read_text())
+    seed_manifest['ios_source_manifest_sha256']=source_manifest_hash; seed_manifest['ios_sdk']=sdk_name
+    (seed/'seed-manifest.json').write_text(json.dumps(seed_manifest,indent=2)+'\n')
+    (seed/'shader_map.tsv').write_text('# TOTK control-code-sha256-v1\n')
+    # The file list: every shader file with its SHA-256. Hashes the manifest already has are kept (the seed's own files,
+    # checked when it was prepared, and the metallibs compile_seed.py hashed); only a file it lacks is read, so a build
+    # whose seed did not change hashes nothing (all ~100,000 files were read again in each build, 2026-10-22).
+    # shader_map.tsv is read in place (DM_NVN_SHMAP); the importer accepts only shader files, so it stays out of the list.
+    manifest=json.loads((seed/'seed-manifest.json').read_text()); known=manifest.get('files',{})
+    names=sorted(n for n in os.listdir(seed) if n not in ('seed-manifest.json','shader_map.tsv') and (seed/n).is_file())
+    manifest['files']={n:known.get(n) or hashlib.sha256((seed/n).read_bytes()).hexdigest() for n in names}
+    (seed/'seed-manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
+    return seed_src,seed
+
 def main():
     p=argparse.ArgumentParser()
     p.add_argument('--tree',type=Path,required=True);p.add_argument('--out',type=Path,required=True)
     p.add_argument('--version',choices=['v0','v112','v121','v143','botw160','botw190'],required=True);p.add_argument('--logs',type=Path,required=True)
     p.add_argument('--platform',choices=['ios','visionos'],default='ios')
     p.add_argument('--image-outside',action='store_true',help='leave romfs.bin out: the device keeps it in Documents/GameData');p.add_argument('--app-name',default='Tears of the Kingdom');p.add_argument('--bundle-id',default='org.macnativegames.totk')
+    p.add_argument('--runtime-only',action='store_true',help='build the executable and the app\'s own files only (no game data, seed or icon); the output is a .app folder')
+    p.add_argument('--embed-layout',type=Path,help='with --runtime-only: zero-filled module sections of these sizes and hashes (gen_embed.py --layout) instead of the exported modules')
     a=p.parse_args(); tree=a.tree.resolve(); ios=tree/'ios';gen=ios/'Gen';logs=a.logs.resolve(); out=a.out.resolve()
     if out.suffix.lower() not in ('.ipa','.app'): raise RuntimeError('iOS output path must end in .ipa (or .app: the unsigned folder)')
+    if a.embed_layout and not a.runtime_only: raise RuntimeError('--embed-layout leaves the module sections empty: use it with --runtime-only')
+    if a.runtime_only and out.suffix.lower()!='.app': raise RuntimeError('--runtime-only writes the unsigned .app folder: the output path must end in .app')
     env=dict(os.environ,DEVELOPER_DIR=developer_dir())
     vision=a.platform=='visionos'; sdk_name='xros' if vision else 'iphoneos'
     if vision and a.version.startswith('botw'): raise RuntimeError('native visionOS builds currently support Tears of the Kingdom only')
@@ -85,13 +119,16 @@ def main():
     botw=a.version.startswith('botw')
     # The runtime's tables and hashes from the player's files (runtime/game_data.h) go into the app as files, not into its code.
     game_data=tree/f'build/game-data/{a.version}'
-    if not (game_data/'runtime-tables.bin').is_file(): raise RuntimeError(f'missing game data: {game_data} (make game-data-{a.version})')
-    # Export the final code after all verified runtime patches have been applied, then embed it in executable segments.
-    host=tree/('build/totk-native' if a.version=='v0' else f'build/totk-native-{a.version}')
-    rewritten=tree/f'rewritten/{a.version}'; modules=gen/'modules';modules.mkdir(exist_ok=True)
-    e=dict(env,TOTK_EXPORT_IOS=str(modules))
-    run([host,rewritten,'export-ios'],tree,logs/'export-ios.log',e)
-    flags=subprocess.check_output([sys.executable,ios/'tools/gen_embed.py',rewritten,gen/'embed.S','--text-dir',modules,'main','subsdk0','sdk'],text=True,env=env).strip()
+    if not a.runtime_only and not (game_data/'runtime-tables.bin').is_file(): raise RuntimeError(f'missing game data: {game_data} (make game-data-{a.version})')
+    if a.embed_layout:
+        flags=subprocess.check_output([sys.executable,ios/'tools/gen_embed.py','--layout',a.embed_layout.resolve(),gen/'embed.S'],text=True,env=env).strip()
+    else:
+        # Export the final code after all verified runtime patches have been applied, then embed it in executable segments.
+        host=tree/('build/totk-native' if a.version=='v0' else f'build/totk-native-{a.version}')
+        rewritten=tree/f'rewritten/{a.version}'; modules=gen/'modules';modules.mkdir(exist_ok=True)
+        e=dict(env,TOTK_EXPORT_IOS=str(modules))
+        run([host,rewritten,'export-ios'],tree,logs/'export-ios.log',e)
+        flags=subprocess.check_output([sys.executable,ios/'tools/gen_embed.py',rewritten,gen/'embed.S','--text-dir',modules,'main','subsdk0','sdk'],text=True,env=env).strip()
     # The app's sources use version-specific patch and generated runtime tables.
     project=project_for_platform((ios/'project.yml').read_text(),a.platform)
     if botw:   # game_patches_botw.c instead of both Tears of the Kingdom files; GAME_BOTW for the runtime and the graphics layer
@@ -125,27 +162,7 @@ def main():
     shutil.copytree(deps/'include',gen/'deps/include',dirs_exist_ok=True)
     (gen/'deps/lib').mkdir(parents=True,exist_ok=True)
     for lib in ('libopus.a','libvpx.a'): clone(deps/'lib'/lib,gen/'deps/lib'/lib)
-    seed_src=tree/f'build/shader-seed/{a.version}'; seed=gen/'totk/shader-seed'
-    if not (seed_src/'seed-manifest.json').is_file(): raise RuntimeError(f'missing verified shader seed: {seed_src}')
-    import hashlib
-    source_manifest_hash=hashlib.sha256((seed_src/'seed-manifest.json').read_bytes()).hexdigest()
-    reuse_seed=seed_reusable(seed,source_manifest_hash,json.loads((seed_src/'seed-manifest.json').read_text())['files'],sdk_name)
-    if not reuse_seed:
-        if seed.exists(): shutil.rmtree(seed)
-        copy_tree(seed_src,seed)
-        run([sys.executable,ios/'tools/compile_seed.py',seed,sdk_name],tree,logs/f'{sdk_name}-shaders.log',env)
-    seed_manifest=json.loads((seed/'seed-manifest.json').read_text())
-    seed_manifest['ios_source_manifest_sha256']=source_manifest_hash; seed_manifest['ios_sdk']=sdk_name
-    (seed/'seed-manifest.json').write_text(json.dumps(seed_manifest,indent=2)+'\n')
-    (seed/'shader_map.tsv').write_text('# TOTK control-code-sha256-v1\n')
-    # The file list: every shader file with its SHA-256. Hashes the manifest already has are kept (the seed's own files,
-    # checked when it was prepared, and the metallibs compile_seed.py hashed); only a file it lacks is read, so a build
-    # whose seed did not change hashes nothing (all ~100,000 files were read again in each build, 2026-10-22).
-    # shader_map.tsv is read in place (DM_NVN_SHMAP); the importer accepts only shader files, so it stays out of the list.
-    manifest=json.loads((seed/'seed-manifest.json').read_text()); known=manifest.get('files',{})
-    names=sorted(n for n in os.listdir(seed) if n not in ('seed-manifest.json','shader_map.tsv') and (seed/n).is_file())
-    manifest['files']={n:known.get(n) or hashlib.sha256((seed/n).read_bytes()).hexdigest() for n in names}
-    (seed/'seed-manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
+    if not a.runtime_only: seed_src,seed=prepare_seed(tree,ios,gen,a.version,sdk_name,logs,env)
     # Generate the app project with resolved identity and the embedded-segment linker flags.
     env.update(TOTK_APP_NAME=a.app_name,TOTK_BUNDLE_ID=a.bundle_id)
     xcconfig=gen/'totk.xcconfig'
@@ -166,6 +183,7 @@ def main():
     if (app/'GameData').exists(): discard(app/'GameData')
     dest=out if out.suffix=='.app' else tree/'build/ios-payload/Payload/TOTK.app'
     discard(dest); copy_tree(app,dest)
+    if a.runtime_only: print(f'runtime app ready: {out}; unsigned, without game data, shader seed or icon'); return
     res=dest/'GameData';res.mkdir(exist_ok=True)
     copy_tree(game_data,res/'game-data')   # TOTK_GAME_DATA (Sources/main.m)
     romfs=tree/f'extracted/{a.version}/romfs'
