@@ -196,12 +196,12 @@ python3.14 build_app.py ~/Games/botw-base.nsp -k ~/keys/prod.keys --update ~/Gam
   - 在“设置 › App › Tears of the Kingdom › 大貼圖 · Large textures”里三选一，重新启动游戏后生效。“省記憶體 · Save memory”是默认值。“保留更多級 · Keep more levels”另外保留片元着色器按指定级采样或查询 LOD 的贴图（等同 `TOTK_MIP_KEEP=2`）。“完整 · Full”让所有贴图保留全部级，占用内存最多（等同 `TOTK_MIP_DROP=0`）。
   - 启动环境里的变量优先于设置。在 Mac 上可以用 `devicectl` 的 `--environment-variables` 设置这些变量。设 `TOTK_MIP_KEEP=0` 时这些规则都关掉，和 2026-10-26 以前一样：上面列出的贴图也少传最高一级。游戏往里渲染的贴图是例外：它在下一次使用时换成全尺寸的副本，但第一遍渲染画进去的内容会丢失。`TOTK_MIP_KEEP_BINDS=0` 只关掉最后两类（通过这类采样器或视图绑定的贴图）的规则，其他几类照常保留全部级。
   - 在 iPhone 和 iPad 上，GPU 写入过的副本（用拷贝命令、清空或经图像绑定写入）不再被标成可清除（系统缺内存时可以收回这块内存），也不再被淘汰（App 内存快不够时丢掉副本）。`TOTK_TEX_KEEP_GPU_WRITTEN=0` 恢复以前的行为，`TOTK_MIP_KEEP=0` 不影响这一项。
-  - 打开日志时，日志会写明用的是哪种模式（“大贴图副本少传最高一级 mip：…”“大贴图副本保留最高一级：…”）。设了 `TOTK_MIP_KEEP_BINDS=0` 时，日志还会写明绑定的规则已关（“大贴图副本保留最高一级：按采样器 / 视图绑定保留的规则关…”）。“大贴图副本保留最高一级：累计标记 …”一行统计标成保留全部级的贴图，每张只算一次，按最先标记它的原因归为三类：渲染目标、GPU 拷贝或清空（日志里写作“渲染目标 / GPU 拷贝 / 清除”）；采样器或视图绑定；着色器槽。每 600 次提交（游戏每把一批 GPU 命令交出去算一次提交），“贴图副本可清除：…”一行还会给出保留全部级的大贴图副本（不含渲染目标）的张数和占用的内存，这是各种原因的合计。
+  - 打开日志时，日志会写明用的是哪种模式（“大贴图副本少传最高一级 mip：…”“大贴图副本保留最高一级：…”）。设了 `TOTK_MIP_KEEP_BINDS=0` 时，日志还会写明绑定的规则已关（“大贴图副本保留最高一级：按采样器 / 视图绑定保留的规则关…”）。“大贴图副本保留最高一级：累计标记 …”一行统计标成保留全部级的贴图，每张只算一次，按最先标记它的原因归为三类：渲染目标、GPU 拷贝或清空（上面列表的第一类，日志里写作“渲染目标 / GPU 拷贝 / 清除”）；采样器或视图绑定（最后两类）；着色器槽（由着色器自己怎样用这张贴图决定：第二到第四类，以及“保留更多級”另外保留的贴图）。每 600 次提交（游戏每把一批 GPU 命令交出去算一次提交），“贴图副本可清除：…”一行还会给出保留全部级的大贴图副本（不含渲染目标）的张数和占用的内存，这是各种原因的合计。
   - 地底林克附近边缘呈阶梯状的假瘴气（#337）怀疑来自少一级的副本，尚未确认。对照方法：在 #337 给出的地点，三个选项各玩一次。“完整”下没有任何贴图被缩小，所以如果“完整”下假瘴气还在，原因就在别处。有 Mac 的话，还可以用 `TOTK_MIP_KEEP_BINDS=0`（只关掉绑定的规则）和 `TOTK_MIP_KEEP=0`（关掉上面列出的这些保留规则）各玩一次，同样和默认设置对照。
 
 #### 没有卡带镜像和密钥：在 Windows 上用旧 IPA 重新打包
 
-如果已经没有卡带镜像、更新包或 `prod.keys`，但还留着 `build_ipa.py` 在提交 30a1b93 打出的 1.4.3 IPA（RomFS 在 App 里，签没签名都可以），可以在 Windows 电脑上用它做出新的 App。下面的工具从这个 IPA 还原游戏文件，重做启动着色器（App 第一次启动时导入的着色器种子）。它们取用 GitHub Actions 只用本仓库构建的运行时（不含游戏代码和数据的 App），把这些拼起来，签名并安装。脚本需要 Python 3.14，除 `push_device_windows.py` 外只用标准库。`push_device_windows.py` 还要用 pymobiledevice3：运行它的 Python 里没有这个包时，它会换到 pymobiledevice3 自己的 Python 里重新运行。在仓库目录里用 `python` 运行这些脚本（用 `python -I` 也可以）。它们调用的其他程序列在下面。截至 2026-10-26，第 1、2、4 步已在 Windows 上实际运行；第 3 步在 GitHub Actions 上运行过，当时工作流还没有写 `TOTK-runtime.commit`。第 5 步用 `--simulate`（用本地文件夹代替设备）演练过。这些步骤都还没有对真机跑过。
+如果已经没有卡带镜像、更新包或 `prod.keys`，但还留着 `build_ipa.py` 在提交 30a1b93 打出的 1.4.3 IPA（RomFS 在 App 里，签没签名都可以），可以在 Windows 电脑上用它做出新的 App。下面的工具从这个 IPA 还原游戏文件，重做启动着色器（App 第一次启动时导入的着色器种子）。它们取用 GitHub Actions 只用本仓库构建的运行时（不含游戏代码和数据的 App），把这些拼起来，签名并安装。脚本需要 Python 3.14，除 `push_device_windows.py` 外只用标准库。`push_device_windows.py` 还要用 pymobiledevice3：运行它的 Python 里没有这个包时，它会换到 pymobiledevice3 自己的 Python 里重新运行。在仓库目录里用 `python` 运行这些脚本（用 `python -I` 也可以）。它们调用的其他程序列在下面。截至 2026-10-26，第 1、2、4 步已在 Windows 上实际运行，第 3 步已在 GitHub Actions 上运行。第 5 步用 `--simulate`（用本地文件夹代替设备）演练过。这些步骤都还没有对真机跑过。
 
 需要准备：
 
@@ -248,7 +248,7 @@ python games/totk/ios/tools/push_device_windows.py deploy <目录>/TOTK.ipa --ro
 
 `deploy` 先备份已安装 App 的存档（`--backup-to`，或用 `--no-backup` 不备份），再覆盖安装。然后它把镜像复制成 App 的 `Documents/GameData` 里每份 1 GiB 的 `romfs.bin.000`、`.001`……（只复制一次，之后的安装都保留；中断后再运行会接着已有的分片继续）。最后，设备上还没有 IPA 旁边的种子时，它把种子作为一个包复制过去。`install`、`romfs`、`seed`、`backup-save` 各做 `deploy` 的一步。`restore-save` 恢复备份，`status` 显示设备上已有的内容（App 版本、镜像分片、种子和存档）。`--udid` 指定设备，`--simulate <文件夹>` 不连设备演练，`check` 不连设备检查 pymobiledevice3。如果游戏提示没有游戏数据或没有着色器（提示里写的是 Mac 上的 `install_device.py`），加 `--romfs` 再运行一次 `deploy`。
 
-**第一次启动**先解包着色器（“正在准备着色器（更新后只做一次）”），再校验游戏数据。解包完成之前，包和解出的文件夹都在设备上，各约 1.2 GB。在 Windows 上做的种子不带 Metal 库（补上的方法见下文）。所以出标题之前，设备要从 MSL（Metal 着色语言源码）编出这些库：种子的管线清单（`pso_title.tsv`、`pso_list.tsv` 和 `pso_manifest.tsv`，列出进游戏前要建的管线）里每条管线用到的库。屏幕上先显示“预热着色器与管线 N%”，这时建的是标题画面的清单。然后依次显示“检查管线存档”和“首次启动编译着色器 N%（以后启动会快）”，下面是已建 / 要建的管线数。满 1 分钟且建完 2% 后，这一行改为“首次启动编译着色器 N%，约剩 M 分钟”。以后的启动可能发现管线存档仍然有效、只是缺了共享清单（`pso_list.tsv`）里的一些管线，例如新加的行，或以前建失败、因而没写进存档的管线。这时显示的是“编译存档里还没有的着色器 N%”，满 1 分钟且建完 2% 后加上“，约剩 M 分钟”。其他清单缺的管线在显示“预热着色器与管线 N%”时建。出标题之前让游戏一直开在前台。以上按代码描述，还没有在设备上看到过（2026-10-26）。
+**第一次启动**先解包着色器（“正在准备着色器（更新后只做一次）”），再校验游戏数据。解包完成之前，包和解出的文件夹都在设备上，各约 1.2 GB。在 Windows 上做的种子不带 Metal 库（补上的方法见下文）。所以出标题之前，设备要从 MSL（Metal 着色语言源码）编出这些库：种子的管线清单（`pso_title.tsv`、`pso_list.tsv` 和 `pso_manifest.tsv`，列出进游戏前要建的管线）里每条管线用到的库。屏幕上先显示“预热着色器与管线 N%”，这时建的是标题画面的清单。然后依次显示“检查管线存档”和“首次启动编译着色器 N%（以后启动会快）”，下面是已建 / 要建的管线数。满 1 分钟且建完 2% 后，这一行改为“首次启动编译着色器 N%，约剩 M 分钟”。以后启动时，管线存档可能仍然有效，只是缺了共享清单（`pso_list.tsv`）里的一些管线，例如第一次启动在出标题前中断了、清单里有新加的行，或以前建失败、因而没写进存档的管线。这时显示的是“编译存档里还没有的着色器 N%”，满 1 分钟且建完 2% 后加上“，约剩 M 分钟”。其他清单缺的管线在显示“预热着色器与管线 N%”时建。出标题之前让游戏一直开在前台。以上按代码描述，还没有在设备上看到过（2026-10-26）。
 
 1.4.3 是 22,591 条管线、17,395 个库。编译用一半的核，2–4 个线程：M4 的 iPad 是 4 个，六核的 iPhone 是 3 个。设备报告热状态为 `serious` 或 `critical` 时，预热降到 2 个线程。`TOTK_WARM_THREADS=<n>` 可以指定线程数。代码注释给出的数字是：Metal 缓存里还没有这个库时，每个库 80–225 毫秒（在 Mac 上测得）。照这个速度，单线程全部编完要 23–65 分钟。Mac 上 8 个线程的编译速度是单线程的 4.6 倍；设备上 2–4 个线程能快多少还没有测过。
 
@@ -259,19 +259,19 @@ python games/totk/ios/tools/push_device_windows.py deploy <目录>/TOTK.ipa --ro
 - 在装有 Xcode 及其 Metal 工具链（Xcode 设置 › Components，或 `xcodebuild -downloadComponent MetalToolchain`）的 Mac 上：把种子文件夹拷过去，运行 `python3 games/totk/ios/tools/compile_seed.py <副本> iphoneos`（1.4.3 用 8 个线程约 1 小时），把生成的 `*_b.metallib` 拷回来，单独放进一个文件夹。
 - 在 Windows 上，Apple 的 Metal Developer Tools for Windows（在 developer.apple.com 用 Apple ID 登录后下载）也许能逐个编译：`metal.exe -fmetal-math-mode=safe -target air64-apple-ios26.0 -c <变体>_b.metal -o <变体>_b.air`，再 `metallib.exe <变体>_b.air -o <变体>_b.metallib`；编不过的文件跳过，设备会自己编那几个。翻译出的着色器需要精确舍入的浮点运算，所以如果 `metal.exe --help` 里没有 `-fmetal-math-mode`，这个版本就不能用。是否有支持 iOS 26 目标的版本、编出的库能否使用，这里都没有验证。
 
-然后加上 `--metallibs <文件夹>`（和 `--seed` 一起）重新打包，再运行 `deploy`。加了库，种子的指纹（`fingerprint.txt` 里的 SHA-256）就变了，所以 `deploy` 会再推送一次种子。至少一半的着色器带库时，预热把种子当作预编译的，和 Mac 打出的 App 一样回到单线程。没有库的着色器仍从 MSL 现编，预热时也只用这一个线程。管线存档在 `pipelines/identity.json` 里记下它对什么有效：系统版本、GPU、翻译链，以及带库的着色器是否不到一半。所以在带库和不带库的种子之间换过之后，第一次启动会自动删掉管线存档，出标题前重新建管线。打开日志时，日志里会写“管线存档：系统版本、GPU、翻译链或着色器库的来源（预编译 / 本机从 MSL 编）变了，删掉重建”。还没有在设备上试过（2026-10-26）。
+然后加上 `--metallibs <文件夹>`（和 `--seed` 一起）重新打包，再运行 `deploy`。加了库，设备用的种子文件夹的指纹（`TOTK-shader-seed/fingerprint.txt` 里的 SHA-256）就变了，所以 `deploy` 会再推送一次种子。至少一半的着色器带库时，预热把种子当作预编译的，和 Mac 打出的 App 一样回到单线程。没有库的着色器仍从 MSL 现编，预热时也只用这一个线程。管线存档在 `pipelines/identity.json` 里记下它对什么有效：系统版本、GPU、翻译链，以及带库的着色器是否不到一半。所以在带库和不带库的种子之间换过之后，第一次启动会自动删掉管线存档，出标题前重新建管线。打开日志时，日志里会写“管线存档：系统版本、GPU、翻译链或着色器库的来源（预编译 / 本机从 MSL 编）变了，删掉重建”。还没有在设备上试过（2026-10-26）。
 
 #### 更新 App 并保留存档
 
 存档在 App 的 `Documents/save` 里：`account.uid`（16 字节，本机账号，第一次启动时生成）和 `save/<32 个十六进制数字>`（以这个账号命名的存档文件夹）。游戏只认生成这些存档时的那个 `account.uid`，所以两者要一起搬。
 
-- **bundle id 和团队都不变**（用装着的那个 App 的描述文件）：覆盖安装会保留它的 Documents（存档，以及 `Documents/GameData` 里的镜像和着色器）和“设置”里的选择，和用 `install_device.py` 续签一样。不要先删掉 App 再装新的：删除会连同 Documents 和存档一起删掉。`push_device_windows.py` 目前只用 `--simulate` 演练过（2026-10-26），所以另外用“文件”App 留一份副本。仍然要先备份存档，有三种做法：
+- **bundle id 和团队都不变**（用装着的那个 App 的描述文件）：覆盖安装会保留它的 Documents（存档，以及 `Documents/GameData` 里的镜像和着色器）和“设置”里的选择，和用 `install_device.py` 续签一样。不要先删掉 App 再装新的：删除会连同 Documents 和存档一起删掉。仍然要先备份存档，有三种做法：
   - `deploy --backup-to <文件夹>` 在安装前备份存档。
   - `push_device_windows.py backup-save --to <文件夹> --bundle-id <id>` 单独备份存档。这两条命令都把备份写到 `<文件夹>/<bundle id>-save-<日期>-<时间>`：里面是 `save` 文件夹的副本，旁边是 `backup-manifest.json`。
-  - 在“文件”App 里把 `save` 文件夹（我的 iPad › Tears of the Kingdom，iPhone 上是“我的 iPhone”）拷到 iCloud 云盘或 U 盘。
+  - 在“文件”App 里把 `save` 文件夹（我的 iPad › Tears of the Kingdom，iPhone 上是“我的 iPhone”）拷到 iCloud 云盘或 U 盘。用了上面两条命令之一时也要留这份副本：`push_device_windows.py` 目前只用 `--simulate` 演练过（2026-10-26）。
 - **bundle id 变了**（例如用了别的团队的描述文件）：对 iOS 来说这是另一个 App，Documents 是空的，旧 App 的数据保持不动。“设置”里的选择留在旧 App，要重新选。用“文件”App 的话：打开一次新 App 再关掉，用旧 App 的 `save` 文件夹替换它的 `save` 文件夹，`account.uid` 一起带上。用工具的话：
   1. 备份旧 App：`push_device_windows.py backup-save --to <文件夹> --bundle-id <旧 id>`。
-  2. 装上新 App 并复制游戏数据：`push_device_windows.py deploy <目录>/TOTK.ipa --romfs <工作目录>/totk/extracted/v143/romfs/romfs.bin`（新 App 还没有存档，不用备份）。
+  2. 装上新 App 并复制游戏数据：`push_device_windows.py deploy <目录>/TOTK.ipa --romfs <工作目录>/totk/extracted/v143/romfs/romfs.bin --no-backup`。新 App 还没有存档。App 装上以后，`deploy` 要求给出 `--backup-to` 或 `--no-backup`，所以带上 `--no-backup`，复制中断时可以原样再运行一次。
   3. 新 App 开着就先关掉。
   4. 运行 `push_device_windows.py restore-save <文件夹>/<旧 id>-save-<日期>-<时间> --bundle-id <新 id> --other-app`，参数是备份时生成的那个带日期的文件夹。它先备份新 App 现有的存档（放在备份文件夹旁边，或 `--safety-to <文件夹>`），再写入备份里的文件，包括 `account.uid`。
 - **旧的着色器缓存：** 每次启动时，App 都会在后台删掉 `Documents/shader-cache` 里其他翻译链的文件夹（30a1b93 打的 App 用的是 `totk-native-v6-unverified` 链）和 `Documents/GameData` 里以前推送的着色器文件夹；打开日志时会写 `[shader-cache] removed N entries of earlier translation chains`。
