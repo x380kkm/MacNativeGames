@@ -139,7 +139,7 @@ def record_verified(output, files):
     """Record the identity of output's files with the digests they were just checked or written with."""
     record = dict(schema=1, files={name: file_identity(output/name)+[sha] for name, sha in sorted(files.items())})
     path = output.with_name(output.name+'.verified.json')
-    path.with_name(path.name+'.tmp').write_text(json.dumps(record, separators=(',', ':')))
+    path.with_name(path.name+'.tmp').write_text(json.dumps(record, separators=(',', ':')), newline='\n')
     path.with_name(path.name+'.tmp').replace(path)
 
 
@@ -239,7 +239,8 @@ def cached_inventory(romfs, modules, game, folder, identity):
     staging.mkdir(parents=True)
     (staging/'shaders.bin').write_bytes(blob)
     (staging/'inventory.json').write_text(json.dumps(dict(identity=identity, shaders_sha256=digest(blob), shaders=table,
-                                                          startup=sorted(startup), archives=archives), separators=(',', ':')))
+                                                          startup=sorted(startup), archives=archives), separators=(',', ':')),
+                                          newline='\n')
     shutil.rmtree(folder, ignore_errors=True)
     staging.rename(folder)
     return index, shaders, startup, archives
@@ -262,7 +263,7 @@ class TranslationCache:
         if not same:
             shutil.rmtree(folder, ignore_errors=True)
             folder.mkdir(parents=True)
-            (folder/'cache.json').write_text(json.dumps(identity))
+            (folder/'cache.json').write_text(json.dumps(identity), newline='\n')
         try:
             self.digests = json.loads((folder/'digests.json').read_text()) if same else {}
         except (OSError, ValueError):
@@ -291,7 +292,7 @@ class TranslationCache:
 
     def put(self, variant, reply, staging):
         if not reply.get('ok'):
-            (self.folder/(variant+'.failed')).write_text(json.dumps(dict(error=reply.get('error'))))
+            (self.folder/(variant+'.failed')).write_text(json.dumps(dict(error=reply.get('error'))), newline='\n')
             return
         for name in (variant+'_b.metal', variant+'_b.json'):
             (self.folder/name).unlink(missing_ok=True)
@@ -313,7 +314,7 @@ class TranslationCache:
                 if p.name.endswith(end) and p.name[:-len(end)] not in variants:
                     p.unlink()
                     self.digests.pop(p.name, None)
-        (self.folder/'digests.json').write_text(json.dumps(self.digests, separators=(',', ':')))
+        (self.folder/'digests.json').write_text(json.dumps(self.digests, separators=(',', ':')), newline='\n')
 
 
 def checked(data, offset, size):
@@ -650,7 +651,7 @@ def builtin_variants(seed, key):
     if not default:
         return []
     try:
-        refl = json.loads((Path(seed)/f'{key}-{SUFFIX}_b.json').read_text())
+        refl = json.loads((Path(seed)/f'{key}-{SUFFIX}_b.json').read_text(encoding='utf-8'))   # its notes are Chinese
     except (OSError, ValueError):
         refl = {}
     found = [default]
@@ -685,7 +686,7 @@ def write_aliases(path, aliases):
     """<seed>.aliases.tsv: each listed variant the seed does not carry, because a variant it does carry serves the same
     bind state, and that variant. The packaging renames the warm-up rows through it (shader_list.py rename), since
     rows recorded on a player's Mac name the variant translated there."""
-    path.with_name(path.name+'.tmp').write_text(''.join(f'{old}\t{new}\n' for old, new in sorted(aliases.items())))
+    path.with_name(path.name+'.tmp').write_text(''.join(f'{old}\t{new}\n' for old, new in sorted(aliases.items())), newline='\n')
     path.with_name(path.name+'.tmp').replace(path)
 
 
@@ -782,7 +783,7 @@ def prepare(romfs, output, translator, spirv_cross, version, shader_list=None, m
                         code_path.unlink()
                         cache.put(variant, reply, staging)
                     if reply.get('ok'):
-                        refl = json.loads((staging/(variant+'_b.json')).read_text())
+                        refl = json.loads((staging/(variant+'_b.json')).read_text(encoding='utf-8'))   # its notes are Chinese
                         if refl['chain'] != CHAIN or refl['stage'] != stage:
                             raise ValueError('prepared shader identity mismatch')
                         deps = json.dumps(refl['deps'], sort_keys=True, separators=(',', ':'))
@@ -816,7 +817,8 @@ def prepare(romfs, output, translator, spirv_cross, version, shader_list=None, m
                                   f'{time.monotonic()-started:.1f}s', flush=True)
                 if mine:   # the shader's index, once all its jobs are done
                     (staging/(key+'.variants')).write_text(json.dumps([dict(variant=v, deps=json.loads(d)) for d, v in
-                                                                       mine.items()], separators=(',', ':'))+'\n')
+                                                                       mine.items()], separators=(',', ':'))+'\n',
+                                                                newline='\n')
                     with lock:
                         produced[key] = mine
         except BaseException:
@@ -849,8 +851,11 @@ def prepare(romfs, output, translator, spirv_cross, version, shader_list=None, m
         if p.name not in wanted:
             p.unlink(missing_ok=True)
     scope = shader_key_scope(shaders, version, identity['source_romfs_sha256'])
-    (staging/'shader-keys.json').write_text(json.dumps(scope, separators=(',', ':'))+'\n')
-    (staging/'pso_manifest.tsv').write_text('# Prepared from this app\'s local game data; '+CHAIN+'\n'+'\n'.join(rows)+'\n')
+    # newline='\n' (as for every file this script writes): the runtime splits pso_manifest.tsv at '\n' only (nvn_mtl.m
+    # warm_plan), and on Windows a C row written with CRLF would name a variant ending in '\r'
+    (staging/'shader-keys.json').write_text(json.dumps(scope, separators=(',', ':'))+'\n', newline='\n')
+    (staging/'pso_manifest.tsv').write_text('# Prepared from this app\'s local game data; '+CHAIN+'\n'+'\n'.join(rows)+'\n',
+                                            newline='\n')
     # On filesystems without native extended-attribute support (exFAT, FAT32), macOS can
     # transparently create "._name" AppleDouble sidecar files for anything written here,
     # including pso_manifest.tsv itself. Exclude them so the manifest's own file list never
@@ -864,7 +869,7 @@ def prepare(romfs, output, translator, spirv_cross, version, shader_list=None, m
                   archives=archives, seconds=time.monotonic()-started,
                   files={p.name: cache.digest(p.name, p) if p.name in linked else digest(p.read_bytes())
                          for p in sorted(staging.iterdir()) if p.name in wanted_final})
-    (staging/'seed-manifest.json').write_text(json.dumps(report, indent=2)+'\n')
+    (staging/'seed-manifest.json').write_text(json.dumps(report, indent=2)+'\n', newline='\n')
     write_aliases(output.with_name(output.name+'.aliases.tsv'), {old: new for old, new in aliases.items() if new in completed})
     if output.exists():
         shutil.rmtree(output)

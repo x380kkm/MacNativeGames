@@ -173,7 +173,7 @@ class ShaderList:
         lines = [f'V\t{key}\t{deps}' for key, deps in sorted(self.variants)]
         lines += [f'L\t{k}\t{src}\t{c:x}\t{d:x}\t{n:x}' for k, src, c, d, n in sorted(self.locators)]
         lines += ['\t'.join(row + (flags,)) for row, flags in self.warm.items()]
-        Path(path).write_text(header_for(path) + ''.join(line + '\n' for line in lines))
+        Path(path).write_text(header_for(path) + ''.join(line + '\n' for line in lines), newline='\n')
 
     def add_warm(self, row, flag):
         old = self.warm.get(row, '')
@@ -297,11 +297,12 @@ def main(argv):
         lst.save(args[0])
         print(f'{len(lst.variants) + len(lst.warm) + len(lst.locators) - before} new; {lst.counts()}')
     elif argv[:1] == ['export'] and len(argv) == 4:
+        # newline='\n': the runtime splits these lists at '\n' only (nvn_mtl.m warm_plan); Windows would write CRLF
         lst = ShaderList.load(argv[1])
-        Path(argv[2]).write_text(lst.export('m', source=list_name(argv[1])))
-        Path(argv[3]).write_text(lst.export('t', source=list_name(argv[1])))
+        Path(argv[2]).write_text(lst.export('m', source=list_name(argv[1])), newline='\n')
+        Path(argv[3]).write_text(lst.export('t', source=list_name(argv[1])), newline='\n')
     elif argv[:1] == ['export'] and len(argv) == 3:
-        Path(argv[2]).write_text(ShaderList.load(argv[1]).export('t', 'm', source=list_name(argv[1])))
+        Path(argv[2]).write_text(ShaderList.load(argv[1]).export('t', 'm', source=list_name(argv[1])), newline='\n')
     elif argv[:1] == ['rename'] and len(argv) >= 3:
         aliases = load_aliases(argv[1])
         for path in argv[2:]:
@@ -309,7 +310,7 @@ def main(argv):
             renamed = rename(text, aliases)
             if renamed != text:   # often a clone of the exported file: written anew, not through the shared blocks
                 Path(path).unlink()
-                Path(path).write_text(renamed)
+                Path(path).write_text(renamed, newline='\n')
     elif argv[:1] == ['prune'] and len(argv) == 3:
         sys.path.insert(0, str(Path(__file__).resolve().parent))   # also when run with python -I
         from prepare_shader_seed import builtin_serves   # it imports this module
