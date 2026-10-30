@@ -891,7 +891,7 @@ int mtl_gpu_addr(uint64_t addr, uint64_t len, void **buf, uint64_t *off, uint64_
 // ---------- 提交 ----------
 // ---------- Submission ----------
 static void defer_reset(void); static void defer_fallback(void);
-typedef struct { int kind; volatile uint32_t *val; uint32_t mode, v; uint64_t addr; uint32_t type; void *vis; int qlog; float sph[4]; } post_op;   // vis：kind 3 的可见性槽表 | vis: the visibility slot table for kind 3; qlog / sph: "querylog" diagnostic
+typedef struct { int kind; volatile uint32_t *val; uint32_t mode, v; uint64_t addr; uint32_t type; void *vis; int qlog; float sph[4]; uint64_t sum; } post_op;   // vis：kind 3 的可见性槽表 | vis: the visibility slot table for kind 3; qlog / sph: "querylog" diagnostic; sum: kind 3 result (completion handler)
 static _Atomic int g_occl_vis; static _Atomic long g_ql_until = -1;   // TOTK occlusion diagnostics (see dm_gfx_querylog_next)
 void dm_gfx_querylog_next(long n); void dm_gfx_passdump_next(long n); void dm_gfx_texdump_next(const char *path);
 // ---------- 遮挡查询（NVN_COUNTER_TYPE_SAMPLES_PASSED）----------
@@ -922,6 +922,22 @@ static id<MTLBuffer> g_vis; static uint32_t g_vis_n;   // 本次提交的可见�
 static int g_vis_on, g_vis_counting, g_vis_cur = -1; static uint64_t g_vis_cur_pass;
 static int g_vis_skipped;                                // a draw counted since the last reset was skipped (its shader or pipeline not ready)
 static _Atomic uint64_t g_occl_raised;                   // reports raised from 0 to 1 because of that (completion handler)
+static _Atomic uint64_t g_occl_guarded;                  // reports raised from 0 to 1 because every query of their frame came to 0 (occl_guard_on)
+/* TOTK_OCCL_GUARD (default on iOS, =0 off, =1 on on the Mac too): an occlusion query only saves work. A wrong "visible"
+   costs GPU time, a wrong "hidden" takes an object out of the picture, so a report nobody can vouch for is reported
+   visible. That covers a report not known to be complete (vis_count_lost, or a command buffer that failed) and the reports
+   of a frame in which every query came to 0: such a frame cannot be told from counters that did not count, and the game
+   then culls everything it asked about. Both become 1, the smallest count that is not "hidden": the game culls on zero /
+   non-zero, and a light it scales by the count stays dark. The rule holds for any scene: at worst an occluded object is
+   drawn. A frame here is a submission, which is what the [occl] line counts. */
+static int occl_guard_on(void) {
+    static int on = -1;
+    if (on < 0) { const char *e = getenv("TOTK_OCCL_GUARD"); on = e ? atoi(e) != 0 : TARGET_OS_IPHONE && !TOTK_BOTW_BUILD; if (on) MLOG("[occl] guard on: reports not known to be complete, and frames of nothing but zeros, read visible (TOTK_OCCL_GUARD=0 off)"); }
+    return on;
+}
+/* A draw counted since the reset never reached its counter: its pass, pipeline or counter slot was missing, or the replay
+   dropped it. draw_skipped marks the draws it holds back on every platform; this mark is the guard's. */
+static void vis_count_lost(void) { if (g_vis_counting && occl_guard_on()) g_vis_skipped = 1; }
 static vis_slot *g_vs; static int g_nvs, g_vscap;      // 自上次清零以来的槽 | Slots since the last reset
 static uint64_t g_cnt_report[32], g_cnt_reset[32];       // 各计数器类型的报告 / 清零次数（诊断） | Report / reset counts per counter type (diagnostics)
 static void vis_clear(void) { for (int i = 0; i < g_nvs; i++) CFRelease(g_vs[i].buf); g_nvs = 0; g_vis_cur = -1; g_vis_skipped = 0; }
@@ -2252,25 +2268,30 @@ uint64_t mtl_sub_commit(void) {
     [o addFeedbackHandler:^(id<MTL4CommitFeedback> cb) {
         gpu_tag_done(gpu_f, cb.GPUStartTime, cb.GPUEndTime);
         if (cb.error) { atomic_store(&g_last_commit_error, 1); static int n, nv; int victim = [cb.error.description containsString:@"InnocentVictim"]; if (victim ? nv++ < 1 : n++ < 8) MLOG("【红】命令缓冲错误详情 fence=%llu：%s | GPU %.3f→%.3f", (unsigned long long)fence, cb.error.description.UTF8String, cb.GPUStartTime, cb.GPUEndTime); if (!victim) MLOG("【红】出错那次提交的现场 fence=%llu：%s", (unsigned long long)fence, cctx.UTF8String); MLOG("【红】命令缓冲执行出错：%s", cb.error.localizedDescription.UTF8String); }
-        int nq = 0, nzero = 0;   // TOTK_OCCL_AUTODUMP: occlusion queries of this submission and how many reported 0
+        int nq = 0, nzero = 0, seen = 0;   // occlusion queries of this submission, how many came to 0, whether any counted a sample
+        int failed = atomic_load(&g_last_commit_error);   // this command buffer or a chunk of the submission failed: its passes wrote no counts
+        for (int i = 0; i < n; i++) if (ops[i].kind == 3) {   // 通过采样数：自清零以来各槽之和 | Samples passed: the sum of all slots since the reset
+            vis_list *l = ops[i].vis; uint64_t sum = 0;
+            for (int k = 0; k < l->n; k++) { const uint64_t *c = ((__bridge id<MTLBuffer>)l->s[k].buf).contents; for (uint32_t q = 0; q <= l->s[k].n; q++) sum += c[l->s[k].slot + q]; CFRelease(l->s[k].buf); }
+            static int qlog = -1; if (qlog < 0) qlog = getenv("TOTK_QUERY_LOG") != NULL;
+            if (qlog) MLOG("[query] frame=%llu fence=%llu addr=%#llx slots=%d samples=%llu", (unsigned long long)gpu_f, (unsigned long long)fence, (unsigned long long)ops[i].addr, l->n, (unsigned long long)sum);
+            if (ops[i].qlog) MLOG("[query] F%llu dst=%#llx samples=%llu sphere=%g,%g,%g,%g%s", (unsigned long long)gpu_f, (unsigned long long)ops[i].addr, (unsigned long long)sum,
+                                  ops[i].sph[0], ops[i].sph[1], ops[i].sph[2], ops[i].sph[3], atomic_load(&g_occl_vis) ? " (reported as visible: occl_visible)" : "");
+            if (atomic_load(&g_occl_vis)) sum = 1u << 20;
+            seen |= sum != 0;
+            /* A counted draw was skipped while its shader or pipeline was prepared (draw_skipped): a 0 may only mean
+               that draw was not drawn, and the game would cull the object until it asks again. The game culls on
+               zero / non-zero (one bounding-sphere proxy per object), so report it visible: at worst an occluded
+               object is drawn for a frame. */
+            if (!sum && (l->skipped || (failed && occl_guard_on()))) { sum = 1; atomic_fetch_add_explicit(&g_occl_raised, 1, memory_order_relaxed); }
+            nq++; nzero += sum == 0;
+            free(l); ops[i].sum = sum;
+        }
+        int all_visible = nq && !seen && occl_guard_on();   // takes every result of the frame: no report is written before this
+        if (all_visible) atomic_fetch_add_explicit(&g_occl_guarded, (uint64_t)nq, memory_order_relaxed);
         for (int i = 0; i < n; i++) {
             if (ops[i].kind == 1) { if (ops[i].mode == 1) *ops[i].val += ops[i].v; else *ops[i].val = ops[i].v; }
-            else if (ops[i].kind == 3) {   // 通过采样数：自清零以来各槽之和 | Samples passed: the sum of all slots since the reset
-                vis_list *l = ops[i].vis; uint64_t sum = 0;
-                for (int k = 0; k < l->n; k++) { const uint64_t *c = ((__bridge id<MTLBuffer>)l->s[k].buf).contents; for (uint32_t q = 0; q <= l->s[k].n; q++) sum += c[l->s[k].slot + q]; CFRelease(l->s[k].buf); }
-                static int qlog = -1; if (qlog < 0) qlog = getenv("TOTK_QUERY_LOG") != NULL;
-                if (qlog) MLOG("[query] frame=%llu fence=%llu addr=%#llx slots=%d samples=%llu", (unsigned long long)gpu_f, (unsigned long long)fence, (unsigned long long)ops[i].addr, l->n, (unsigned long long)sum);
-                if (ops[i].qlog) MLOG("[query] F%llu dst=%#llx samples=%llu sphere=%g,%g,%g,%g%s", (unsigned long long)gpu_f, (unsigned long long)ops[i].addr, (unsigned long long)sum,
-                                      ops[i].sph[0], ops[i].sph[1], ops[i].sph[2], ops[i].sph[3], atomic_load(&g_occl_vis) ? " (reported as visible: occl_visible)" : "");
-                if (atomic_load(&g_occl_vis)) sum = 1u << 20;
-                /* A counted draw was skipped while its shader or pipeline was prepared (draw_skipped): a 0 may only mean
-                   that draw was not drawn, and the game would cull the object until it asks again. The game culls on
-                   zero / non-zero (one bounding-sphere proxy per object), so report it visible: at worst an occluded
-                   object is drawn for a frame. */
-                if (!sum && l->skipped) { sum = 1; atomic_fetch_add_explicit(&g_occl_raised, 1, memory_order_relaxed); }
-                nq++; nzero += sum == 0;
-                free(l); uint64_t rec[2] = {sum, gpu_ticks()}; memcpy((void *)ops[i].addr, rec, sizeof rec);
-            }
+            else if (ops[i].kind == 3) { uint64_t rec[2] = {all_visible ? 1 : ops[i].sum, gpu_ticks()}; memcpy((void *)ops[i].addr, rec, sizeof rec); }
             // TOTK: NVNcounterData = {counter, timestamp}; TIMESTAMP / TIMESTAMP_TOP reports write counter 0 (the timestamp is the second word).
             // The game's conditional clears depend on that 0 (see cond_eval); other unimplemented counter types also report 0.
             else { uint64_t t = gpu_ticks(), rec[2] = {0, t}; memcpy((void *)ops[i].addr, rec, sizeof rec); }
@@ -2292,9 +2313,9 @@ uint64_t mtl_sub_commit(void) {
           if (nq) { nf++; nres += (uint64_t)nq; nres0 += (uint64_t)nzero; nall0 += nq >= 5 && nzero == nq; }
           if (!f0) f0 = gpu_f;
           if (gpu_f >= f0 + 1200) {
-              if (nf) MLOG("[occl] frames %llu-%llu: %llu with occlusion queries, %llu with all of them 0; %.1f%% of %llu results 0; %llu raised to 1 so far (a counted draw was skipped)", (unsigned long long)f0,
+              if (nf) MLOG("[occl] frames %llu-%llu: %llu with occlusion queries, %llu with all of them 0; %.1f%% of %llu results 0; %llu raised to 1 so far (a counted draw did not run); guard raised %llu so far (all of a frame 0)", (unsigned long long)f0,
                            (unsigned long long)gpu_f, (unsigned long long)nf, (unsigned long long)nall0, 100.0 * (double)nres0 / (double)nres, (unsigned long long)nres,
-                           (unsigned long long)atomic_load(&g_occl_raised));
+                           (unsigned long long)atomic_load(&g_occl_raised), (unsigned long long)atomic_load(&g_occl_guarded));
               f0 = gpu_f; nf = nall0 = nres = nres0 = 0;
           } }
         cpend_done(fence);
@@ -13059,7 +13080,7 @@ frz_plain:;
     __unsafe_unretained id<MTLRenderCommandEncoder> en = g_enc ? g_enc : rp_begin_ex(mode);
     NS_VALID_UNTIL_END_OF_SCOPE id en_keep = nil;
     g_fd_dw = NULL; g_fd_di = NULL;
-    if (!en) { g_draw_skip[8]++; return; }
+    if (!en) { g_draw_skip[8]++; vis_count_lost(); return; }
     if (g_pass.mfx || g_mfx.role) {   // TOTK_MFX: every draw into the canvas after the scene copy goes to the UI layer too
         int r = 0;
         if (g_pass.mfx) {
@@ -13084,7 +13105,7 @@ frz_plain:;
     if (g_pso_lmap) { g_pso_lmap = NULL; g_pso_fsfn = nil; memset(&g_pso_fz, 0, sizeof g_pso_fz); g_pso_dirty = 1; }   // 下一次绘制重新按自身情况取 | The next draw fetches again according to its own situation
     __unsafe_unretained id<MTLRenderPipelineState> ps = cur_ps;
     if (!ps && g_pso_deferred) { draw_skipped(); return; }   // async shaders: the pipeline is compiling in the background
-    if (!ps) { g_draw_skip[9]++; static int failed_n; if (failed_n++ < 3) MLOG("[pipeline-draw] rt-depth=%p serial=%llu fmt=%#x pass-depth=%u dt=%u dw=%u fs-depth=%d", R.rt.depth, (unsigned long long)(R.rt.depth ? R.rt.depth->serial : 0), R.rt.depth ? R.rt.depth->d.format : 0, g_pass.dfmt, S.ds.dt, S.ds.dw, pr->sh[1] ? pr->sh[1]->writes_depth : 0); return; }
+    if (!ps) { g_draw_skip[9]++; vis_count_lost(); static int failed_n; if (failed_n++ < 3) MLOG("[pipeline-draw] rt-depth=%p serial=%llu fmt=%#x pass-depth=%u dt=%u dw=%u fs-depth=%d", R.rt.depth, (unsigned long long)(R.rt.depth ? R.rt.depth->serial : 0), R.rt.depth ? R.rt.depth->d.format : 0, g_pass.dfmt, S.ds.dt, S.ds.dw, pr->sh[1] ? pr->sh[1]->writes_depth : 0); return; }
     if (ps != g_enc_pso) { enc_r_pso(en, ps); g_enc_pso = ps; }
     static id<MTLDepthStencilState> cur_ds; static uint64_t cur_ds_pass;
     if (g_dss_dirty || cur_ds_pass != g_pass.serial) { cur_ds = dss_get(g_pass.hd, g_pass.hs); cur_ds_pass = g_pass.serial; g_dss_dirty = 0; }
@@ -13241,7 +13262,7 @@ frz_plain:;
     switch (prim) {
         case 0: mp = MTLPrimitiveTypePoint; break; case 1: mp = MTLPrimitiveTypeLine; break; case 3: mp = MTLPrimitiveTypeLineStrip; break;
         case 4: case 7: case 8: mp = MTLPrimitiveTypeTriangle; break; case 5: mp = MTLPrimitiveTypeTriangleStrip; break;
-        default: RED_ONCE(19, "图元类型 %d 未实现", prim); g_draw_skip[11]++; return;
+        default: RED_ONCE(19, "图元类型 %d 未实现", prim); g_draw_skip[11]++; vis_count_lost(); return;
     }
     if (g_vis_counting && perdraw_vis_on() && g_enc_has_vis && g_vis && g_vis_n < VIS_SLOTS - 256) {
         /* TOTK_ANOMALY: this draw gets its own slot, which also counts towards the game's samples-passed counter (a report
@@ -13252,10 +13273,10 @@ frz_plain:;
                g_vs[g_nvs++] = (vis_slot){(void *)CFBridgingRetain(g_vis), slot, 0}; }
         enc_r_visibility(en, MTLVisibilityResultModeCounting, (NSUInteger)slot * 8); g_enc_vis = (int)slot + 1; g_vis_cur = -1; g_anom_vis_slot = (int)slot;
     } else if (g_vis_counting) {   // 遮挡查询计数：本通道新槽（报告 / 清零后也换新槽） | Occlusion query counting: a new slot for this render pass (also switch to a new slot after a report / reset)
-        if (!g_enc_has_vis) RED_ONCE(34, "遮挡查询计数开始时所在通道没挂可见性缓冲（首次清零发生在通道中途），该通道的采样不计");
+        if (!g_enc_has_vis) { RED_ONCE(34, "遮挡查询计数开始时所在通道没挂可见性缓冲（首次清零发生在通道中途），该通道的采样不计"); vis_count_lost(); }
         else {
             if (g_vis_cur < 0 || g_vis_cur_pass != g_pass.serial) {
-                if (g_vis_n >= VIS_SLOTS) RED_ONCE(35, "可见性槽用尽");
+                if (g_vis_n >= VIS_SLOTS) { RED_ONCE(35, "可见性槽用尽"); vis_count_lost(); }
                 else { g_vis_cur = (int)g_vis_n++; g_vis_cur_pass = g_pass.serial;
                     if (g_nvs == g_vscap) { g_vscap = g_vscap ? g_vscap * 2 : 64; g_vs = realloc(g_vs, g_vscap * sizeof *g_vs); }
                     g_vs[g_nvs++] = (vis_slot){(void *)CFBridgingRetain(g_vis), (uint32_t)g_vis_cur}; }
@@ -13350,7 +13371,7 @@ frz_plain:;
         if (dw->count && (dw->instances > 1 || dw->base_instance)) enc_r_draw_instanced(en, mp, dw->first, dw->count, dw->instances, dw->base_instance);
         else if (dw->count && dw->instances >= 0) enc_r_draw(en, mp, dw->first, dw->count);
     } else {
-        if (prim == 7) { RED_ONCE(20, "带索引的四边形未实现"); return; }
+        if (prim == 7) { RED_ONCE(20, "带索引的四边形未实现"); vis_count_lost(); return; }
         if (prim == NVN_DRAW_PRIMITIVE_QUAD_STRIP) {
             if (di->count < 4) return;
             if (di->itype < 0 || di->itype > 2) MDIE("quad strip index type %d", di->itype);
@@ -13359,11 +13380,11 @@ frz_plain:;
             /* Never read stale CPU data for an index buffer written earlier on the GPU timeline. */
             if (pend_hits(di->ibuf, bytes)) {
                 RED_ONCE(19, "GPU-written indexed quad strips require GPU conversion");
-                g_draw_skip[11]++; return;
+                g_draw_skip[11]++; vis_count_lost(); return;
             }
             void *source; uint64_t offset;
             if (!mtl_addr(di->ibuf, bytes, &source, &offset)) {
-                RED_ONCE(22, "quad strip index buffer is outside its memory pool"); return;
+                RED_ONCE(22, "quad strip index buffer is outside its memory pool"); vis_count_lost(); return;
             }
             const uint8_t *indices = [(__bridge id<MTLBuffer>)source contents];
             if (!indices) MDIE("quad strip index buffer is not host visible");
@@ -13381,7 +13402,7 @@ frz_plain:;
         }
         void *mb; uint64_t mo;
         uint64_t gpu;
-        if (!mtl_gpu_addr(di->ibuf, 1, &mb, &mo, &gpu)) { RED_ONCE(22, "索引缓冲不在内存池里"); return; }
+        if (!mtl_gpu_addr(di->ibuf, 1, &mb, &mo, &gpu)) { RED_ONCE(22, "索引缓冲不在内存池里"); vis_count_lost(); return; }
         if (di->itype == 0) {   // TOTK: Metal has no 8-bit indices; widen to 16 bits in this submit's arena (restart 0xFF -> 0xFFFF)
             id<MTLBuffer> wide; size_t woff;
             int wi = wide_find(di);

@@ -145,6 +145,26 @@ negative control, reaches 1.0 in none. The neighbouring-texel case draws only ev
 columns: drawn pixels stay at 0.25 and untouched pixels at zero, independent of when a tile is stored. A texture that
 is also `read()` is refused. The original game's 1.2.1 report found the squares gone with no store left before the decals.
 
+## Occlusion queries
+
+The game culls objects with NVN's samples-passed counter: one bounding-sphere proxy per object is drawn against a small
+occluder depth target, and an object whose report is 0 is not drawn. Metal counts into a visibility buffer, one slot per
+render pass, and the completion handler of the submission sums the slots and writes the reports (`mtl_sub_commit`).
+
+An occlusion query only saves work: a wrong "visible" costs GPU time, a wrong "hidden" takes an object out of the picture.
+So on iPhone and iPad a report nobody can vouch for reads 1, the smallest count that is not "hidden". The game culls on
+zero or non-zero, and a light it scales by the count stays dark. Two kinds of report are raised:
+
+- a report not known to be complete: a counted draw never reached its counter (its shader, pipeline, pass or counter slot
+  was missing), or a command buffer of the submission failed;
+- every report of a frame in which all queries came to 0. Such a frame cannot be told from counters that did not count.
+  An iPad run (2026-10-30, 835 to 903 s) had about 9 queries per submission all at 0 with no draw skipped; the log cannot
+  say whether they were true.
+
+`TOTK_OCCL_GUARD=0` turns this off, and `TOTK_OCCL_GUARD=1` turns it on on the Mac, where it is off by default. A draw held
+back while its shader is prepared raises its report on every platform, whatever the switch says. The `[occl]` line in the
+log counts what was measured ("with all of them 0") and both kinds of raised report ("raised to 1", "guard raised").
+
 ## The build (build_app.py)
 
 1. Detect XCI (HFS0 secure partition) or NSP (PFS0) by its header. Read the base Program NCA in place, extract ExeFS,
