@@ -14,7 +14,7 @@ with iTunes or Apple Devices installed, for its usbmuxd) and unlocked; the app i
   python push_device_windows.py restore-save <backup folder> --bundle-id <id> [--safety-to <dir>] [--other-app]
   python push_device_windows.py status --bundle-id <id>
   python push_device_windows.py check                                    offline: pymobiledevice3 and the API used here
-Every command but check also takes --udid <device> (default: the first one connected by cable) and --simulate <folder>
+Every command but check also takes --udid <device> (required with more than one attached) and --simulate <folder>
 (a local folder standing for the app's container, to rehearse a run without a device); --bundle-id defaults to the
 IPA's for deploy and install.
 
@@ -357,7 +357,7 @@ def arguments():
         c = sub.add_parser(name)
         for arg in args: c.add_argument(arg, type=Path)
         c.add_argument('--bundle-id', help='the app on the device (default: the IPA\'s, for deploy and install)')
-        c.add_argument('--udid', help='the device (default: the first one connected by cable)')
+        c.add_argument('--udid', help='the device (default: the one attached; with more than one the command stops and lists them)')
         c.add_argument('--simulate', type=Path, help='a local folder standing for the app\'s container')
         return c
     deploy = command('deploy', 'ipa')

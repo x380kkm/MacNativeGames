@@ -4,12 +4,16 @@ shaders as one pack read back as ios/Sources/main.m seed_unpack reads it, and sa
 account. No device and no game files."""
 import hashlib
 import json
+import os
 import plistlib
+import subprocess
 import sys
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
+from unittest.mock import patch
 
 TOOLS = Path(__file__).resolve().parents[1]/'games/totk/ios/tools'
 sys.path.insert(0, str(TOOLS))
@@ -167,6 +171,97 @@ class Push(unittest.TestCase):
         self.assertEqual(self.box.installed()['CFBundleIdentifier'], 'a.b')
 
 
+def fake_usbmux(attached, names):
+    """The two pymobiledevice3 modules DeviceContainer's constructor imports, and the list of connections they were asked
+    for as (serial, autopair). attached: the UDIDs usbmuxd lists; names: udid -> name, a device without one does not
+    answer when it is opened without pairing."""
+    opened = []
+
+    async def list_devices():
+        return [SimpleNamespace(serial=udid) for udid in attached]
+
+    class Lockdown:
+        def __init__(self, udid):
+            self.short_info = dict(DeviceName=names.get(udid), ProductVersion='27.0', UniqueDeviceID=udid)
+
+        async def close(self):
+            pass
+
+    async def create_using_usbmux(serial=None, autopair=True):
+        opened.append((serial, autopair))
+        if serial is None and not attached:
+            raise LookupError('no device connected')
+        if not autopair and serial not in names:
+            raise PermissionError('not paired')
+        return Lockdown(serial or attached[0])
+
+    package = ModuleType('pymobiledevice3'); package.__path__ = []
+    lockdown, usbmux = ModuleType('pymobiledevice3.lockdown'), ModuleType('pymobiledevice3.usbmux')
+    lockdown.create_using_usbmux, usbmux.list_devices = create_using_usbmux, list_devices
+    return {'pymobiledevice3': package, 'pymobiledevice3.lockdown': lockdown, 'pymobiledevice3.usbmux': usbmux}, opened
+
+
+class OneDevice(unittest.TestCase):
+    """DeviceContainer on a fake device list: it takes a device only when that device is the one meant."""
+    IPAD, PHONE = '00008132-000A', '00008110-000B'
+    NAMES = {IPAD: 'My iPad', PHONE: 'My iPhone'}
+
+    def open(self, attached, udid=None, names=NAMES, first=False):
+        modules, opened = fake_usbmux(attached, names)
+        with patch.dict(sys.modules, modules), patch.dict(os.environ, {'TOTK_PUSH_FIRST_DEVICE': '1' if first else '0'}):
+            try:
+                return app_container.DeviceContainer('a.b', udid), opened
+            except app_container.ContainerError as e:
+                return e, opened
+
+    def test_the_one_device_attached_is_taken_by_its_udid(self):
+        box, opened = self.open([self.IPAD])
+        self.assertEqual(opened, [(self.IPAD, True)])
+        self.assertEqual(box.name, f'My iPad (iOS 27.0, {self.IPAD})')   # what the commands print before they write
+
+    def test_a_device_on_usb_and_wifi_is_one_device(self):
+        _, opened = self.open([self.IPAD, self.IPAD])
+        self.assertEqual(opened, [(self.IPAD, True)])
+
+    def test_two_devices_are_refused_and_listed_before_any_is_opened_for_writing(self):
+        error, opened = self.open([self.IPAD, self.PHONE])
+        self.assertIsInstance(error, app_container.ContainerError)
+        self.assertIn('--udid', str(error))
+        self.assertIn(f'{self.IPAD}  My iPad', str(error))
+        self.assertIn(f'{self.PHONE}  My iPhone', str(error))
+        self.assertEqual(opened, [(self.IPAD, False), (self.PHONE, False)])   # the names only, without pairing
+
+    def test_a_device_that_does_not_answer_is_listed_by_its_udid(self):
+        error, _ = self.open([self.IPAD, self.PHONE], names={self.IPAD: 'My iPad'})
+        self.assertIn(f'{self.PHONE}  (name not available)', str(error))
+        self.assertIn(f'{self.IPAD}  My iPad', str(error))
+
+    def test_udid_names_the_device_among_several(self):
+        box, opened = self.open([self.IPAD, self.PHONE], self.PHONE)
+        self.assertEqual(opened, [(self.PHONE, True)])
+        self.assertIn(self.PHONE, box.name)
+
+    def test_no_device_says_so_as_before(self):
+        error, _ = self.open([])
+        self.assertIn('no device', str(error))
+
+    def test_the_off_switch_takes_the_first_one_as_before(self):
+        _, opened = self.open([self.IPAD, self.PHONE], first=True)
+        self.assertEqual(opened, [(None, True)])
+
+    def test_the_commands_print_the_device_before_their_work(self):
+        with tempfile.TemporaryDirectory() as d:
+            mod = Path(d)/'mod'; mod.mkdir()
+            (mod/'a.bin').write_bytes(b'x')
+            (mod/'manifest.tsv').write_text(f'a.bin\t1\t{hashlib.sha256(b"x").hexdigest()}\t-\n')
+            run = subprocess.run([sys.executable, str(TOOLS/'push_device_windows.py'), 'push-mod', str(mod), '--bundle-id', 'a.b',
+                                  '--simulate', str(Path(d)/'device')], capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        lines = run.stdout.splitlines()
+        self.assertTrue(lines[0].startswith('device: folder '), lines)
+        self.assertTrue(lines[1].startswith('mod: copying'), lines)
+
+
 FONT, TABLE, LAYOUT = ('Font/Font.Nin_NX_NVN.bfarc.zs', 'System/Resource/ResourceSizeTable.Product.140.Nin_NX_NVN.rsizetable.zs',
                        'UI/LayoutArchive/Common.Product.140.Nin_NX_NVN.blarc.zs')
 
@@ -262,7 +357,6 @@ class Mods(unittest.TestCase):
         self.assertEqual(push.remove_mod(self.box, log=quiet), 'none')
 
     def test_the_commands_with_simulate(self):
-        import subprocess
         mod = self.mod({FONT: b'font'})
         script = TOOLS/'push_device_windows.py'
         def run(*args):

@@ -13,6 +13,8 @@ DeviceContainer: the device is connected by cable (on Windows with iTunes or App
 and unlocked. house_arrest gives the app's Documents over AFC (the app has UIFileSharingEnabled and get-task-allow); an
 IPA goes to the device's staging folder over AFC in 4 MiB writes and installation_proxy installs it (pymobiledevice3
 apps install reads the whole IPA into memory first). pymobiledevice3's async API runs on an event loop of its own thread.
+Without a udid it takes the device attached and refuses when there is more than one (one_device), since every method
+here writes to whichever device was taken; TOTK_PUSH_FIRST_DEVICE=1 lets pymobiledevice3 take the first one it lists.
 pymobiledevice3 (a pipx or uv tool) has its own Python: pmd3_python finds it, check_api checks without a device that the
 names and parameters used here are there."""
 import inspect, json, os, plistlib, shutil, subprocess, sys, zipfile
@@ -112,18 +114,33 @@ class LocalContainer:
         pass
 
 
+def one_device(attached, name_of):
+    """The UDID of the one device in attached, None when it is empty. attached: the UDIDs usbmuxd lists, in which a device
+    on both USB and Wi-Fi comes twice. More than one device is refused, naming each: name_of(udid) -> its name or None."""
+    udids = list(dict.fromkeys(attached))
+    if len(udids) > 1:
+        listed = '\n'.join(f'  {udid}  {name_of(udid) or "(name not available)"}' for udid in udids)
+        raise ContainerError(f'more than one device is attached; name one with --udid:\n{listed}')
+    return udids[0] if udids else None
+
+
 class DeviceContainer:
     """The app's container on the device through pymobiledevice3: house_arrest (the app's Documents over AFC) and
     installation_proxy (install, look up)."""
     def __init__(self, bundle_id, udid=None):
         import asyncio, contextlib, threading
         from pymobiledevice3.lockdown import create_using_usbmux
+        from pymobiledevice3.usbmux import list_devices
         self.asyncio, self.contextlib, self.bundle_id, self.afc = asyncio, contextlib, bundle_id, None
         self.loop = asyncio.new_event_loop()
         threading.Thread(target=self.loop.run_forever, daemon=True).start()
         self.stack = contextlib.AsyncExitStack()
         try:
+            if not udid and os.environ.get('TOTK_PUSH_FIRST_DEVICE') != '1':
+                udid = one_device([device.serial for device in self.call(list_devices())], self.device_name)
             self.lockdown = self.call(create_using_usbmux(serial=udid))
+        except ContainerError:
+            raise
         except Exception as e:   # pymobiledevice3 raises its own errors for no device, no pairing, a locked device
             raise ContainerError(f'no device (connect it by cable, unlock it, trust this computer): {type(e).__name__}: {e}') from None
         info = self.lockdown.short_info
@@ -131,6 +148,18 @@ class DeviceContainer:
 
     def call(self, coroutine):
         return self.asyncio.run_coroutine_threadsafe(coroutine, self.loop).result()
+
+    def device_name(self, udid):
+        """An attached device's name, None when it does not answer (locked, not paired). autopair is off, so a device that
+        is only being named shows no pairing prompt."""
+        from pymobiledevice3.lockdown import create_using_usbmux
+        try:
+            lockdown = self.call(create_using_usbmux(serial=udid, autopair=False))
+        except Exception:   # pymobiledevice3's own errors, as in __init__: the device is still listed, by its UDID
+            return None
+        name = lockdown.short_info.get('DeviceName')
+        self.call(lockdown.close())
+        return name
 
     def documents(self):
         """house_arrest's AFC on the app's Documents, opened on first use; its paths are '/Documents/...'."""
@@ -254,15 +283,17 @@ class DeviceContainer:
 
 def check_api():
     """The pymobiledevice3 names and parameters DeviceContainer calls, without a device."""
-    from pymobiledevice3 import lockdown, exceptions
+    from pymobiledevice3 import lockdown, exceptions, usbmux
     from pymobiledevice3.services import afc, house_arrest, installation_proxy
     import importlib.metadata
-    needs = [(lockdown.create_using_usbmux, ['serial']), (house_arrest.HouseArrestService.create, ['lockdown', 'bundle_id', 'documents_only']),
+    needs = [(lockdown.create_using_usbmux, ['serial', 'autopair']), (usbmux.MuxDevice, ['serial']),
+             (house_arrest.HouseArrestService.create, ['lockdown', 'bundle_id', 'documents_only']),
              (installation_proxy.InstallationProxyService.send_package, ['cmd', 'options', 'handler', 'package_path']),
              (installation_proxy.InstallationProxyService.get_apps, ['bundle_identifiers'])]
     for f, params in needs:
         have = inspect.signature(f).parameters
         require(all(p in have for p in params), f'{f.__qualname__}: expected parameters {params}, has {list(have)}')
+    require(inspect.iscoroutinefunction(usbmux.list_devices), 'usbmux.list_devices is not an async function')
     for name in ('listdir', 'stat', 'fopen', 'fwrite', 'fread', 'fclose', 'rename', 'rm_single', 'makedirs',
                  'get_file_contents', 'set_file_contents'):
         method = getattr(afc.AfcService, name, None)   # some are wrapped by pymobiledevice3's path_to_str
