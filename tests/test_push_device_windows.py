@@ -2,7 +2,9 @@
 LocalContainer, what --simulate uses): the RomFS image in parts with its marker last, a copy that stopped going on, the
 shaders as one pack read back as ios/Sources/main.m seed_unpack reads it, and saves backed up and restored with their
 account. No device and no game files."""
+import contextlib
 import hashlib
+import io
 import json
 import os
 import plistlib
@@ -253,6 +255,16 @@ class OneDevice(unittest.TestCase):
         box, opened = self.open([self.IPAD, self.PHONE], self.PHONE)
         self.assertEqual(opened, [(self.PHONE, True)])
         self.assertIn(self.PHONE, box.name)
+
+    def test_udid_on_the_command_line_reaches_the_container(self):
+        modules = fake_usbmux([], {})[0]   # gets past main's import check, which would run it again in another interpreter
+        command = ['push_device_windows.py', 'status', '--bundle-id', 'a.b', '--udid', self.PHONE]
+        with patch.dict(sys.modules, modules), patch.object(sys, 'argv', command), \
+                patch.object(app_container, 'DeviceContainer') as container, patch.object(push, 'status') as status, \
+                contextlib.redirect_stdout(io.StringIO()):
+            push.main()
+        container.assert_called_once_with('a.b', self.PHONE)
+        status.assert_called_once_with(container.return_value)
 
     def test_no_device_says_so_as_before(self):
         error, _ = self.open([])
