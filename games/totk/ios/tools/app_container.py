@@ -14,7 +14,8 @@ and unlocked. house_arrest gives the app's Documents over AFC (the app has UIFil
 IPA goes to the device's staging folder over AFC in 4 MiB writes and installation_proxy installs it (pymobiledevice3
 apps install reads the whole IPA into memory first). pymobiledevice3's async API runs on an event loop of its own thread.
 Without a udid it takes the device attached and refuses when there is more than one (one_device), since every method
-here writes to whichever device was taken; TOTK_PUSH_FIRST_DEVICE=1 lets pymobiledevice3 take the first one it lists.
+here writes to whichever device was taken; TOTK_PUSH_FIRST_DEVICE=1 leaves the pick to pymobiledevice3, which takes the
+first device on USB, otherwise the last one listed.
 pymobiledevice3 (a pipx or uv tool) has its own Python: pmd3_python finds it, check_api checks without a device that the
 names and parameters used here are there."""
 import inspect, json, os, plistlib, shutil, subprocess, sys, zipfile
@@ -116,12 +117,16 @@ class LocalContainer:
 
 def one_device(attached, name_of):
     """The UDID of the one device in attached, None when it is empty. attached: the UDIDs usbmuxd lists, in which a device
-    on both USB and Wi-Fi comes twice. More than one device is refused, naming each: name_of(udid) -> its name or None."""
-    udids = list(dict.fromkeys(attached))
+    on both USB and Wi-Fi comes twice, perhaps spelled differently: pymobiledevice3 (MuxDevice.matches_udid) compares them
+    without hyphens, and so does this; the first spelling is the one used. More than one device is refused, naming each:
+    name_of(udid) -> its name or None."""
+    udids = {}
+    for udid in attached:
+        udids.setdefault(udid.replace('-', ''), udid)
     if len(udids) > 1:
-        listed = '\n'.join(f'  {udid}  {name_of(udid) or "(name not available)"}' for udid in udids)
+        listed = '\n'.join(f'  {udid}  {name_of(udid) or "(name not available)"}' for udid in udids.values())
         raise ContainerError(f'more than one device is attached; name one with --udid:\n{listed}')
-    return udids[0] if udids else None
+    return next(iter(udids.values()), None)
 
 
 class DeviceContainer:

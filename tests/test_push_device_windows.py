@@ -172,20 +172,21 @@ class Push(unittest.TestCase):
 
 
 def fake_usbmux(attached, names):
-    """The two pymobiledevice3 modules DeviceContainer's constructor imports, and the list of connections they were asked
-    for as (serial, autopair). attached: the UDIDs usbmuxd lists; names: udid -> name, a device without one does not
-    answer when it is opened without pairing."""
-    opened = []
+    """The two pymobiledevice3 modules DeviceContainer's constructor imports, the list of connections they were asked for
+    as (serial, autopair) and the list of UDIDs whose connection was closed. attached: the UDIDs usbmuxd lists; names:
+    udid -> name, a device without one does not answer when it is opened without pairing."""
+    opened, closed = [], []
 
     async def list_devices():
         return [SimpleNamespace(serial=udid) for udid in attached]
 
     class Lockdown:
         def __init__(self, udid):
+            self.udid = udid
             self.short_info = dict(DeviceName=names.get(udid), ProductVersion='27.0', UniqueDeviceID=udid)
 
         async def close(self):
-            pass
+            closed.append(self.udid)
 
     async def create_using_usbmux(serial=None, autopair=True):
         opened.append((serial, autopair))
@@ -198,7 +199,7 @@ def fake_usbmux(attached, names):
     package = ModuleType('pymobiledevice3'); package.__path__ = []
     lockdown, usbmux = ModuleType('pymobiledevice3.lockdown'), ModuleType('pymobiledevice3.usbmux')
     lockdown.create_using_usbmux, usbmux.list_devices = create_using_usbmux, list_devices
-    return {'pymobiledevice3': package, 'pymobiledevice3.lockdown': lockdown, 'pymobiledevice3.usbmux': usbmux}, opened
+    return {'pymobiledevice3': package, 'pymobiledevice3.lockdown': lockdown, 'pymobiledevice3.usbmux': usbmux}, opened, closed
 
 
 class OneDevice(unittest.TestCase):
@@ -207,7 +208,7 @@ class OneDevice(unittest.TestCase):
     NAMES = {IPAD: 'My iPad', PHONE: 'My iPhone'}
 
     def open(self, attached, udid=None, names=NAMES, first=False):
-        modules, opened = fake_usbmux(attached, names)
+        modules, opened, self.closed = fake_usbmux(attached, names)
         with patch.dict(sys.modules, modules), patch.dict(os.environ, {'TOTK_PUSH_FIRST_DEVICE': '1' if first else '0'}):
             try:
                 return app_container.DeviceContainer('a.b', udid), opened
@@ -223,18 +224,30 @@ class OneDevice(unittest.TestCase):
         _, opened = self.open([self.IPAD, self.IPAD])
         self.assertEqual(opened, [(self.IPAD, True)])
 
+    def test_two_spellings_of_a_udid_are_one_device(self):
+        # pymobiledevice3's MuxDevice.matches_udid compares UDIDs without hyphens
+        plain = self.IPAD.replace('-', '')
+        _, opened = self.open([plain, self.IPAD])
+        self.assertEqual(opened, [(plain, True)])
+        error, opened = self.open([self.IPAD, plain, self.PHONE])
+        self.assertIsInstance(error, app_container.ContainerError)
+        self.assertEqual(opened, [(self.IPAD, False), (self.PHONE, False)])
+
     def test_two_devices_are_refused_and_listed_before_any_is_opened_for_writing(self):
         error, opened = self.open([self.IPAD, self.PHONE])
         self.assertIsInstance(error, app_container.ContainerError)
+        self.assertTrue(str(error).startswith('more than one device is attached'), str(error))
         self.assertIn('--udid', str(error))
         self.assertIn(f'{self.IPAD}  My iPad', str(error))
         self.assertIn(f'{self.PHONE}  My iPhone', str(error))
         self.assertEqual(opened, [(self.IPAD, False), (self.PHONE, False)])   # the names only, without pairing
+        self.assertEqual(self.closed, [self.IPAD, self.PHONE])
 
     def test_a_device_that_does_not_answer_is_listed_by_its_udid(self):
         error, _ = self.open([self.IPAD, self.PHONE], names={self.IPAD: 'My iPad'})
         self.assertIn(f'{self.PHONE}  (name not available)', str(error))
         self.assertIn(f'{self.IPAD}  My iPad', str(error))
+        self.assertEqual(self.closed, [self.IPAD])   # the other one was never opened
 
     def test_udid_names_the_device_among_several(self):
         box, opened = self.open([self.IPAD, self.PHONE], self.PHONE)
@@ -245,7 +258,7 @@ class OneDevice(unittest.TestCase):
         error, _ = self.open([])
         self.assertIn('no device', str(error))
 
-    def test_the_off_switch_takes_the_first_one_as_before(self):
+    def test_the_off_switch_leaves_the_pick_to_pymobiledevice3(self):
         _, opened = self.open([self.IPAD, self.PHONE], first=True)
         self.assertEqual(opened, [(None, True)])
 
