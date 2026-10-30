@@ -69,7 +69,8 @@ try:
 except ImportError:
     sys.exit('needs Python 3.14 (compression.zstd): run it with python3.14')
 import make_mod_manifest
-from make_mod_manifest import VERSIONS, app_image_dir, merge_build_patches, read_index, write_manifest
+from make_mod_manifest import VERSIONS, app_image_dir, read_index, write_mod_manifest
+from romfs_formats import ZSDIC_PACK, repack, sarc_members, zstd_dictionaries
 
 try:
     from fontTools.pens.basePen import BasePen
@@ -107,21 +108,6 @@ def grow_restbl(table, original, growth):
     return bytes(out)
 
 
-def sarc_members(data):
-    """name -> (absolute start, end) of every SARC member (as in make_romfs_patches.py)."""
-    assert data[:4] == b'SARC' and data[6:8] == b'\xff\xfe'
-    header, size, start = struct.unpack_from('<HxxII', data, 4)
-    assert size == len(data) and data[header:header + 4] == b'SFAT'
-    count = struct.unpack_from('<H', data, header + 6)[0]; names = header + 12 + count * 16
-    assert data[names:names + 4] == b'SFNT'; names += 8
-    out = {}
-    for i in range(count):
-        _, attribute, lo, hi = struct.unpack_from('<4I', data, header + 12 + i * 16)
-        offset = names + (attribute & 0xffffff) * 4
-        out[data[offset:data.index(0, offset, start)].decode()] = (start + lo, start + hi)
-    return out
-
-
 def bfotf_decode(blob):
     key = struct.unpack_from('<I', blob, 0)[0] ^ MAGIC
     size = int.from_bytes(struct.pack('<I', struct.unpack_from('<I', blob, 4)[0] ^ key), 'big')
@@ -137,35 +123,6 @@ def bfotf_encode(otf, key):
     for i in range(0, size - size % 4, 4):
         out += struct.pack('<I', struct.unpack_from('<I', otf, i)[0] ^ key)
     return bytes(out + otf[size - size % 4:])
-
-
-def repack(sarc, name, blob):
-    """The SARC with member `name` replaced by `blob`, every other member byte-identical, in the original order and alignment."""
-    start = struct.unpack_from('<I', sarc, 12)[0]
-    fat = 0x14; count = struct.unpack_from('<H', sarc, fat + 6)[0]
-    nodes = [list(struct.unpack_from('<4I', sarc, fat + 12 + i * 16)) for i in range(count)]
-    members = sarc_members(sarc); by_range = {(lo, hi): k for k, (lo, hi) in members.items()}
-    blobs = [blob if by_range[(start + n[2], start + n[3])] == name else sarc[start + n[2]:start + n[3]] for n in nodes]
-
-    def alignment(offset):
-        a = 1
-        while offset % (a * 2) == 0 and a < 0x2000:
-            a *= 2
-        return a
-    data, placed = bytearray(), {}
-    for i in sorted(range(count), key=lambda i: nodes[i][2]):
-        a = alignment(nodes[i][2]) if nodes[i][2] else 1
-        while len(data) % a:
-            data += b'\0'
-        placed[i] = (len(data), len(data) + len(blobs[i])); data += blobs[i]
-    head = bytearray(sarc[:start])
-    for i in range(count):
-        struct.pack_into('<II', head, fat + 12 + i * 16 + 8, *placed[i])
-    out = bytearray(bytes(head) + bytes(data)); struct.pack_into('<I', out, 8, len(out)); out = bytes(out)
-    check = sarc_members(out)
-    for k, (lo, hi) in members.items():
-        assert out[check[k][0]:check[k][1]] == (blob if k == name else sarc[lo:hi]), k
-    return out
 
 
 # ---- drawing (units of the font's 1000-unit em; the round A/B/X/Y icons fill y 20..585) ----
@@ -553,14 +510,6 @@ def redraw(otf, text_fonts, style, faces=None):
     return out.getvalue(), len(icons)
 
 
-def write_mod_manifest(mod, romfs, index):
-    """Merge the mod's Common archive with the build's own patch of it (make_romfs_patches.py patches the same archive),
-    then write the manifest: (merged paths, Manifest). The merged file's line names the build's file as the original, so
-    the game loads it in place of the build's overlay; without the merge both replace one file and the game stops at start."""
-    merged = merge_build_patches(mod, romfs, index)
-    return merged, write_manifest(mod, romfs, merged=merged)
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('mod', type=Path, help='the mod folder to write into (other files in it are kept and listed too)')
@@ -610,10 +559,7 @@ def main():
     with (image_dir / 'romfs.bin').open('rb') as image:
         def read(path):
             offset, size = index[path]; image.seek(offset); data = image.read(size); assert len(data) == size; return data
-        dictionaries = {}
-        pack = zstd.decompress(read('Pack/ZsDic.pack.zs'))
-        for lo, hi in sarc_members(pack).values():
-            d = zstd.ZstdDict(pack[lo:hi]); dictionaries[d.dict_id] = d
+        dictionaries = zstd_dictionaries(read(ZSDIC_PACK))
         raws = {path: read(path) for path in archives}
         restbl_raw = read(restbl)
         layout = layout_path

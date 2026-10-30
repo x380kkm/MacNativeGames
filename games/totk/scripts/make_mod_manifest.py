@@ -244,7 +244,7 @@ def save_manifest(mod, found):
 def write_manifest(mod, romfs, excludes=(), app_replaced=None, merged=None):
     """Write <mod>/manifest.tsv and return what was found (Manifest). Nothing is written when a path is misspelt: the
     caller names the paths, so a mod is never given a manifest that stops the game at start. Tools that write a mod's
-    manifest (this script, make_button_icons.py) go through here, so each one reads the record by name."""
+    manifest (this script, write_mod_manifest()) go through here, so each one reads the record by name."""
     found = manifest(mod, romfs, excludes, app_replaced, merged)
     if not found.misspelt:
         save_manifest(mod, found)
@@ -266,7 +266,7 @@ def build_patches(romfs):
 def merge_build_patches(mod, romfs, index):
     """Merge each mod file the build's own overlay also replaces with the build's edit (merge_build_patch): path -> the
     SHA-256 of the build's file, the `merged` of manifest() and write_manifest(). Raises ValueError when one can't be
-    merged. Tools that write a mod's files (this script, make_button_icons.py) call it before writing the manifest."""
+    merged. Tools that write a mod's files (this script, write_mod_manifest()) call it before writing the manifest."""
     folder, patches = build_patches(romfs)
     merged = {}
     for name, build_sha in patches.items():
@@ -274,6 +274,14 @@ def merge_build_patches(mod, romfs, index):
                 merge_build_patch(mod, name, romfs, index, folder, build_sha):
             merged[name] = build_sha
     return merged
+
+
+def write_mod_manifest(mod, romfs, index):
+    """Merge the mod's Common archive with the build's own patch of it (make_romfs_patches.py patches the same archive),
+    then write the manifest: (merged paths, Manifest). The merged file's line names the build's file as the original, so
+    the game loads it in place of the build's overlay; without the merge both replace one file and the game stops at start."""
+    merged = merge_build_patches(mod, romfs, index)
+    return merged, write_manifest(mod, romfs, merged=merged)
 
 
 def changes_original(name, mod, romfs, index):
