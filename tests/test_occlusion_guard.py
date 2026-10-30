@@ -16,6 +16,7 @@ NVN = ROOT / 'games/totk/third_party/d2r_gfx/gfx/nvn'
 # itself rules out (rendering disabled, both faces culled, an empty scissor) marks nothing: the Switch counts no samples
 # for it either.
 LOST_DRAWS = (
+    'if (!S.prog) { RED_ONCE(18, "绘制前没有绑定程序"); g_draw_skip[0]++; vis_count_lost(); return; }',
     'if (pr && pr->missing) { draw_skipped(); return; }',
     'if (fit < 0) { draw_skipped(); return; }',
     'if (!ps && g_pso_deferred) { draw_skipped(); return; }',

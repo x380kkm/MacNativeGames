@@ -12962,7 +12962,7 @@ static void totk_uw_wide_ui(NvProg *pr, const p_draw *dw, const p_draw_idx *di, 
 }
 #endif
 static void draw_inner(const p_draw *dw, const p_draw_idx *di) {
-    if (!S.prog) { RED_ONCE(18, "绘制前没有绑定程序"); g_draw_skip[0]++; return; }
+    if (!S.prog) { RED_ONCE(18, "绘制前没有绑定程序"); g_draw_skip[0]++; vis_count_lost(); return; }
     g_prog_for_draw = 1; __unsafe_unretained NvProg *pr = prog_get(S.prog); g_prog_for_draw = 0;
     if (pr && pr->missing && async_shaders()) { shader_predict_maybe(); prog_resolve(pr, draw_may_skip(pr)); }
     if (pr && pr->missing) { draw_skipped(); return; }   // TOTK (iOS): a stage is not translated yet; Mac (async shaders): still in the background
