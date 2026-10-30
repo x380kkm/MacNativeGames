@@ -318,7 +318,7 @@ python games/totk/ios/tools/push_device_windows.py push-mod <工作目录>/mods/
 
 `push-mod` 先像游戏启动时那样，按大小和 SHA-256 核对 `manifest.tsv` 列出的每个文件。然后把这些文件复制到 `Documents/mods/v143`，`manifest.tsv` 最后复制，所以游戏不会加载复制了一半的 mod。复制中断后再运行，会接着已有的文件继续。`deploy … --mod <文件夹>` 在安装之后做同样的事。`status` 列出 `Documents/mods` 里的文件夹。游戏下次启动时加载 mod；但[耐久和电池预设](#耐久和电池预设windows)里选中的那个值的文件夹在设备上时，App 加载那个文件夹，所以新的图标 mod 要经过 `make_gameplay_tuning.py --slots` 和 `push-slots`。`--version` 指定别的版本的文件夹（默认 `v143`）。
 
-**删除：** `push_device_windows.py remove-mod --bundle-id <id>` 删掉 `Documents/mods/v143`，先删 `manifest.tsv`；下次启动就是 Switch 图标。设备上的档位文件夹也带着图标，所以也要删掉。在“文件”App 里删掉 `mods` 文件夹（我的 iPad › Tears of the Kingdom）会全部删除。
+**删除：** `push_device_windows.py remove-mod --bundle-id <id>` 删掉 `Documents/mods/v143`，先删 `manifest.tsv`；下次启动就是 Switch 图标。设备上[耐久和电池预设](#耐久和电池预设windows)的文件夹也带着图标，所以也要删掉（`remove-mod --slot`）。在“文件”App 里删掉 `mods` 文件夹（我的 iPad › Tears of the Kingdom）会全部删除。
 
 `push-mod` 和 `remove-mod` 目前只用 `--simulate` 演练过（2026-10-30）。
 
@@ -332,6 +332,8 @@ python games/totk/ios/tools/push_device_windows.py push-mod <工作目录>/mods/
 | 中 | `v143-moderate` | ×3 | ÷2 | ×2 |
 | 强（这一行的默认值） | `v143-strong` | ×5 | ÷3 | ×3 |
 | 最大 | `v143-max` | ×10 | ÷5 | ×5 |
+
+工具和日志把这四档都叫作 slot。
 
 游戏只加载一个 mod 文件夹，所以每个文件夹里都带着按键图标文件，“关”就是只有图标。这是对玩法的改动。它只通过这些文件夹进入游戏，而这些文件夹是你用自己的游戏文件做的：上游的 App 没有这一行；本分支这一行的默认值是“强”，所以文件夹在设备上时，游戏按“强”运行，除非改这一行。选中的值没有文件夹时，App 用 `Documents/mods/v143`，这个也没有就不加载 mod。
 

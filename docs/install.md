@@ -319,7 +319,7 @@ python games/totk/ios/tools/push_device_windows.py push-mod <work>/mods/v143-xbo
 
 `push-mod` first checks each file `manifest.tsv` lists, by size and SHA-256, as the game does at start. It then copies those files into `Documents/mods/v143`, `manifest.tsv` last, so the game never loads a half-copied mod. A copy that stopped goes on from the files already there. `deploy … --mod <folder>` does the same after the install. `status` lists the folders in `Documents/mods`. The game loads the mod at its next start, unless the folder of the value chosen in [Durability and battery presets](#durability-and-battery-presets-on-windows) is on the device: the app then loads that folder, so a new icon mod goes through `make_gameplay_tuning.py --slots` and `push-slots`. `--version` names another version's folder (`v143` by default).
 
-**To remove it:** `push_device_windows.py remove-mod --bundle-id <id>` removes `Documents/mods/v143`, `manifest.tsv` first; the next start plays with the Switch icons. Slot folders on the device hold the icons too, so remove those as well. In the Files app, deleting the `mods` folder (On My iPad › Tears of the Kingdom) removes them all.
+**To remove it:** `push_device_windows.py remove-mod --bundle-id <id>` removes `Documents/mods/v143`, `manifest.tsv` first; the next start plays with the Switch icons. The folders of the [Durability and battery presets](#durability-and-battery-presets-on-windows) on the device hold the icons too, so remove those as well (`remove-mod --slot`). In the Files app, deleting the `mods` folder (On My iPad › Tears of the Kingdom) removes them all.
 
 `push-mod` and `remove-mod` have been rehearsed with `--simulate` only (2026-10-30).
 
@@ -333,6 +333,8 @@ A RomFS mod made from your own game files can make weapons, shields and bows las
 | Moderate | `v143-moderate` | ×3 | ÷2 | ×2 |
 | Strong (the row's default) | `v143-strong` | ×5 | ÷3 | ×3 |
 | Max | `v143-max` | ×10 | ÷5 | ×5 |
+
+The tools and the log call each of the four a slot.
 
 The game loads one mod folder, so every folder also holds the button icon files, and Off is the icons alone. This is a gameplay change. It reaches the game only through these folders, which you make from your own game files: upstream's app has no such row, and in this fork the row's default is Strong, so with the folders on the device the game plays Strong until the row says otherwise. Without a folder for the chosen value the app uses `Documents/mods/v143`, and without that one it loads no mod.
 
