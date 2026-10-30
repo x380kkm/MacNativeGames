@@ -185,9 +185,10 @@ recorded, because which one is stored is known only at the end of the pass, and 
 later one stands, as on the Switch. A draw that samples such an image stores the pass first instead of reading the tile. A
 write through the slot that is not stored is lost, as it is in the Breath of the Wild build.
 
-None of this has run on a device, so its effect in the game is untested. `tests/test_rt_dup.py` runs the store rule, the
-marks and the clears on crafted passes, and checks in the source that the draw, both store paths, the clears and the tile
-read use them.
+None of this has run on a device, so its effect in the game is untested. `tests/test_rt_dup.py` runs, on crafted passes, the
+rule that picks the stored slot, the rule that records which slots a draw wrote through, and where clears go. It also checks
+in the source that the draw code, the two places that set a pass's store actions, the clears and the tile read use those
+rules.
 
 `TOTK_RT_DUP=0` turns this off; on iPhone and iPad, Settings › Apps › Tears of the Kingdom › Graphics troubleshooting › One
 image at two colour slots › Off sets it. `TOTK_RT_DUP=1` turns it on on the Mac. Apple's Mac GPUs are tile-based too, so the
@@ -205,8 +206,9 @@ zero or non-zero, and a light it scales by the count stays dark. A Breath of the
 its Settings pane has no such row; `TOTK_OCCL_GUARD=1` turns it on there. Two kinds of report are raised:
 
 - a report not known to be complete: a counted draw never reached its counter (its shader, pipeline, pass or counter slot
-  was missing), or a command buffer of the submission failed. A failed chunk is found by its fence, which relies on its
-  completion handler running before the submission's final one;
+  was missing), or a command buffer of the submission failed. A long submission is split into several command buffers. One
+  that fails records the submission's fence (its number), and the submission's final completion handler compares it, which
+  relies on that buffer's handler running first;
 - every report of a frame in which all queries came to 0, and the reports at 0 in the 30 frames with queries after it. A
   frame of nothing but zeros cannot be told from counters that did not count, and one report above 0 in the next frame says
   nothing about the zeros beside it. Without those frames an object whose zeros are false would flip between shown and
@@ -227,7 +229,7 @@ while that count stays at 0.
 
 The guard has not run on a device, so its effect in the game is untested. `tests/test_occlusion_guard.py` runs the report
 rules on crafted submissions, and checks in the source that the draw path marks the draws that miss their counter and that
-the completion handler writes what the rules settle.
+the completion handler writes the values those rules decide.
 
 ## The build (build_app.py)
 
