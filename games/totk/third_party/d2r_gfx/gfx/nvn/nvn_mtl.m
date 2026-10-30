@@ -4537,6 +4537,38 @@ void ts_after(void);
 typedef struct { uint64_t ser, bytes; uint32_t lv, sl; int idx; uint8_t depth, state, ridx, drawn, why, load, wrote, wwhy; const char *wkey; int wslot; } sd_att;   // depth：0 颜色 1 深度 2 模板（深度模板合一的贴图两部分分开判）   // state 0 未定 1 需要 2 多余；idx：颜色附件序号，深度为 -1 | depth: 0 color 1 depth 2 stencil (the two parts of a combined depth-stencil texture are decided separately)   // state 0 undecided 1 needed 2 redundant; idx: color attachment index, -1 for depth
 static sd_att g_sd[9]; static int g_nsd;
 static unsigned g_sd_plain;   // TOTK: g_sd entries (bit i) written in this encoder by a draw that samples none of its attachments (att_unstored_read)
+/* TOTK_RT_DUP (default on iOS, =0 off, =1 on on the Mac too): one image at two colour slots (rt_dup_of) has two tile
+   copies, and storing both writes the copy that was never drawn over the other, in a different order per tile. So one copy
+   reaches memory: the first slot a draw wrote through, else the first slot (rt_dup_unstored). That is correct on any
+   tile-based GPU, the Mac's included, and changes nothing in a pass without such slots; the Mac keeps it off until it has
+   been compared there.
+   Breath of the Wild leaves the slot unattached (BOTW_RT_DUP_SKIP). Here both slots stay attached and the other copy is
+   stored as DontCare: a pipeline names every slot's format and write mask, so an unattached slot gives every draw of the
+   pass a pipeline key (g_pass.cfmt, pso_key_norm) that no row of the seed or the archive has, and the warm-up builds
+   pipelines play no longer asks for. With the slot attached, pipelines and the warm-up stay as they are. A DontCare store
+   of a slot nothing was drawn through leaves memory as it was (udc_on: 0 differences read back on an A19 Pro). */
+static int rt_dup_on(void) {
+    static int on = -1;
+    if (on < 0) { const char *e = getenv("TOTK_RT_DUP"); on = e ? atoi(e) != 0 : TARGET_OS_IPHONE && !TOTK_BOTW_BUILD; }
+    return on;
+}
+#ifndef GAME_BOTW
+/* A pending clear reaches both tile copies: which one is stored is known only at the end of the pass. */
+static void rt_dup_share_clears(void) {
+    if (!rt_dup_on()) return;
+    for (int i = 1; i < R.rt.n && i < 8; i++) { int j = rt_dup_of(&R.rt, i); if (j >= 0 && R.clear_c[i] && !R.clear_c[j]) { R.clear_c[j] = 1; R.cc[j] = R.cc[i]; } }
+    for (int i = 1; i < R.rt.n && i < 8; i++) { int j = rt_dup_of(&R.rt, i); if (j >= 0 && R.clear_c[j]) { R.clear_c[i] = 1; R.cc[i] = R.cc[j]; } }
+}
+#endif
+static int rt_dup_unstored(const sd_att *t) {
+    if (t->depth || !rt_dup_on()) return 0;
+    const sd_att *keep = NULL;
+    for (int i = 0; i < g_nsd; i++) { const sd_att *o = &g_sd[i];
+        if (!o->depth && o->ser == t->ser && o->lv == t->lv && o->sl == t->sl && (!keep || (o->drawn && !keep->drawn))) keep = o; }
+    if (keep == t) return 0;
+    static int said; if (!said++) MLOG("[totk] colour slots %d and %d hold the same image (serial %llu): only slot %d is stored (TOTK_RT_DUP=0 off)", keep->idx, t->idx, (unsigned long long)t->ser, keep->idx);
+    return 1;
+}
 static int g_udc_ab = -1, g_udc_ab_on;
 // 本通道没写的附件（只做深度 / 模板测试、颜色写掩码为 0 等）写回改 DontCare：内容本就在内存里，免一次整块写回。
 // 缺省开：Mac 同进程开 / 关截图与空对照同分布；A19 Pro 私有 Depth32F_S8 / RGBA8 DontCare 后读回 0 处不同。
@@ -6802,6 +6834,7 @@ static void udc_note_draw(NvProg *pr) {
     uint32_t shader_color_mask = pr ? pr->udc_cmask : 0;
     for (int i = 0; i < g_nsd; i++) {
         sd_att *t = &g_sd[i];
+        if (!t->depth && t->idx >= 0 && ((S.chmask.mask >> (4 * t->idx)) & 0xf) && (!shader_color_mask || (shader_color_mask >> t->idx & 1))) t->drawn = 1;   // rt_dup_unstored: 0 mask = no reflection, the channel mask decides
         if (image_write) { t->wrote = 1; t->wwhy = 1; }
         else if (t->depth == 0 && t->idx >= 0 && (((S.chmask.mask >> (4 * t->idx)) & 0xf) || (shader_color_mask >> t->idx & 1))) { t->wrote = 1; t->wwhy = (S.chmask.mask >> (4 * t->idx)) & 0xf ? 2 : 3; }
         else if (t->depth == 1 && S.ds.dw) { t->wrote = 1; t->wwhy = 4; }
@@ -10192,7 +10225,7 @@ static void sd_finish(void) {
     if (!g_nsd) return;
     if (!tbdr_on()) {   // 优化全关：一律写回 | All optimizations off: always write back
         for (int i = 0; i < g_nsd; i++) { sd_att *t = &g_sd[i];
-            enc_r_store(g_enc, t->depth, MTLStoreActionStore, (NSUInteger)t->idx); }
+            enc_r_store(g_enc, t->depth, rt_dup_unstored(t) ? MTLStoreActionDontCare : MTLStoreActionStore, (NSUInteger)t->idx); }
         g_nsd = 0; return; }
     uint8_t nst[9];
     if (sdx_decide(nst)) { for (int i = 0; i < g_nsd; i++) if (nst[i] == 2) g_sd[i].state = 2; else sd_need(&g_sd[i], nst[i] >> 2); }
@@ -10212,7 +10245,7 @@ static void sd_finish(void) {
                                         && !xv_disabled(xtag = xv_tag_pass(R.rt.color[t->idx], t->lv, t->idx, &R.rt));
         int xvdead = xvcand && xv_trial_get(xtag, 0) >= XV_TRIAL;   // 过了试用期才真的不写回 | Only after the trial period is the write-back really skipped
         if (xvcand && !xvdead) xv_set(t->ser, t->lv, t->sl, XV_PROBE, xtag);   // 试用期：照常写回，只跟踪下一次触碰 | Trial period: write back as usual, only track the next touch
-        int dead = t->state == 2 || udc_dead || xvdead; MTLStoreAction sa = dead ? MTLStoreActionDontCare : MTLStoreActionStore;
+        int dead = t->state == 2 || udc_dead || xvdead || rt_dup_unstored(t); MTLStoreAction sa = dead ? MTLStoreActionDontCare : MTLStoreActionStore;
         if (xvdead) { xv_set(t->ser, t->lv, t->sl, XV_INVALID, xtag); g_xv_dc++; }
         enc_r_store(g_enc, t->depth, sa, (NSUInteger)t->idx);
         g_sd_n_all++; if (dead) { g_sd_n_dead++; g_sd_dead_bytes += t->bytes; g_bw_store -= t->bytes; if (udc_dead) g_udc_saved_bytes += t->bytes; }
@@ -10892,6 +10925,7 @@ static id<MTLFunction> att_fb_take(NvProg *pr, uint64_t *rs, int *n) {
         if (b->kind != NVN_RB_TEX || k == 8) return nil;
         int j = -1; for (int m = 0; m < R.rt.n && m < 8; m++) if (R.rt.color[m] && R.rt.color[m]->serial == ser) { j = m; break; }
         if (j < 0) return nil;   // the depth attachment
+        if (rt_dup_on()) for (int m = j + 1; m < R.rt.n && m < 8; m++) if (rt_dup_of(&R.rt, m) == j) return nil;   // two tile copies: which one holds the draws is known at the store
         uint64_t s_; int lv, sl; rt_sub(&R.rt, j, &s_, &lv, &sl);
         if (lv || sl) return nil;
         int tid = (int)(h & 0xfffff); void *tv_ = NULL; if (tid) tex_fast_rid(tid, &tv_); __unsafe_unretained id<MTLTexture> tv = (__bridge id<MTLTexture>)tv_;
@@ -12040,6 +12074,10 @@ static void clear_quad(const p_clear_color *c) {
         sc = (MTLScissorRect){(NSUInteger)x0, (NSUInteger)y0, (NSUInteger)(x1 - x0), (NSUInteger)(y1 - y0)}; }
     if (!g_pass.cfmt[c->index]) MDIE("partial color clear: attachment %d not in the pass", c->index);
     clear_quad_core(en, g_pass.cfmt, g_pass.hd ? g_pass.dfmt : 0, g_pass.hs ? g_pass.sfmt : 0, g_pass.samples, tw, th, c->index, c->mask, c->rgba, sc);
+    /* every tile copy of the image: which one is stored is known only at the end of the pass */
+    if (rt_dup_on()) { int first = rt_dup_of(&R.rt, c->index); if (first < 0) first = c->index;
+        for (int i = first; i < R.rt.n && i < 8; i++) if (i != c->index && g_pass.cfmt[i] && (i == first || rt_dup_of(&R.rt, i) == first))
+            clear_quad_core(en, g_pass.cfmt, g_pass.hd ? g_pass.dfmt : 0, g_pass.hs ? g_pass.sfmt : 0, g_pass.samples, tw, th, i, c->mask, c->rgba, sc); }
 }
 /* Depth/stencil clears obey the scissor and stencil bit mask even inside an active pass. */
 static void clear_ds_core(id<MTL4RenderCommandEncoder> en, const uint32_t cfmt[8], uint32_t dfmt, uint32_t sfmt, uint32_t samples,

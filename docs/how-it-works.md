@@ -145,6 +145,23 @@ negative control, reaches 1.0 in none. The neighbouring-texel case draws only ev
 columns: drawn pixels stay at 0.25 and untouched pixels at zero, independent of when a tile is stored. A texture that
 is also `read()` is refused. The original game's 1.2.1 report found the squares gone with no store left before the decals.
 
+## One image at two colour slots
+
+A game can attach the same texture level or layer at two colour slots and mask off the second one. The Switch writes straight
+to memory, so that is harmless. An Apple GPU keeps one tile copy per attachment and stores each at the end of the pass, so
+the copy nothing was drawn through overwrites the other, in a different order per tile (scattered squares in Breath of the
+Wild's albedo). This is true of any tile-based GPU.
+
+The Breath of the Wild build leaves the second slot unattached. A pipeline names every slot's format and write mask, so
+here that would give each draw of the pass a key that no row of the seed or the archive has, and the warm-up would build
+pipelines that play no longer asks for. So on iPhone and iPad both slots stay attached and only the store changes: the first slot a draw wrote through is stored, or the first slot if none was, and the
+other copy is stored as DontCare. Pipelines, the archive and the warm-up are untouched. Clears reach both copies, because
+which one is stored is known only at the end of the pass, and a draw that samples such an image stores the pass first
+instead of reading the tile. A write through the slot that is not stored is lost, as it is in the Breath of the Wild build.
+
+`TOTK_RT_DUP=0` turns this off and `TOTK_RT_DUP=1` turns it on on the Mac. Apple's Mac GPUs are tile-based too, so the rule
+holds there, but the Mac default stays off until it has been compared on one.
+
 ## Occlusion queries
 
 The game culls objects with NVN's samples-passed counter: one bounding-sphere proxy per object is drawn against a small

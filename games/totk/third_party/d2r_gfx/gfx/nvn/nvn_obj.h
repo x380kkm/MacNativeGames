@@ -126,16 +126,13 @@ enum {
 // Payload (immediately follows op_hdr)
 typedef struct { int32_t n; const tex_t *color[8]; view_t cview[8]; uint8_t has_cview[8]; const tex_t *depth; view_t dview; uint8_t has_dview; } p_set_rt;
 typedef struct { int32_t index, mask; float rgba[4]; } p_clear_color;
-#ifdef GAME_BOTW
-/* The same texture level / layer attached at more than one colour slot: only the first slot is attached (botw.md; the
-   finding and fix come from nxnative, MIT, github.com/seedds/nxnative, rt_dup_slot). Breath of the Wild's G-buffer passes
-   attach the albedo and another buffer twice each (c1 = c2, c3 = c4) with channel write masks 0 on the second ones. The
-   Switch's ROP writes only masked channels, so the slots do not interfere; on Apple's tile-based GPUs each attachment has
-   its own tile memory, stored back whole at the end of the pass, so the copy stored later (loaded, never written)
-   overwrote the other's writes in a different order per tile: the albedo kept scattered squares. Returns the earlier slot
-   holding the same image, or -1. Slots are compared by serial: records hold copies of the texture objects.
-   The macros below are the call sites in nvn_mtl.m: they sit at the end of existing lines and expand to nothing for TOTK,
-   so TOTK's code and line numbers (res_add_at) stay as they were. */
+/* The same texture level / layer attached at more than one colour slot (botw.md; the finding and fix come from nxnative,
+   MIT, github.com/seedds/nxnative, rt_dup_slot). Breath of the Wild's G-buffer passes attach the albedo and another buffer
+   twice each (c1 = c2, c3 = c4) with channel write masks 0 on the second ones. The Switch's ROP writes only masked
+   channels, so the slots do not interfere; on Apple's tile-based GPUs each attachment has its own tile memory, stored back
+   whole at the end of the pass, so the copy stored later (loaded, never written) overwrote the other's writes in a
+   different order per tile: the albedo kept scattered squares. Returns the earlier slot holding the same image, or -1.
+   Slots are compared by serial: records hold copies of the texture objects. */
 static inline int rt_dup_of(const p_set_rt *r, int i) {
     if (!r->color[i]) return -1;
     int lv = r->has_cview[i] && r->cview[i].set_levels ? r->cview[i].base_level : 0, ly = r->has_cview[i] && r->cview[i].set_layers ? r->cview[i].min_layer : 0;
@@ -146,6 +143,10 @@ static inline int rt_dup_of(const p_set_rt *r, int i) {
     }
     return -1;
 }
+#ifdef GAME_BOTW
+/* Breath of the Wild attaches only the first slot. The macros below are the call sites in nvn_mtl.m: they sit at the end
+   of existing lines, so TOTK's code and line numbers (res_add_at) stay as they were. TOTK keeps every slot attached and
+   chooses the store instead (rt_dup_on, nvn_mtl.m), so its macros that change the attachments expand to nothing. */
 /* a clear of a slot left unattached goes to the slot holding the same image */
 #define BOTW_RT_DUP_CLEARS() { for (int i_ = 1; i_ < R.rt.n && i_ < 8; i_++) { int j_ = rt_dup_of(&R.rt, i_); \
         if (j_ >= 0 && R.clear_c[i_]) { if (!R.clear_c[j_]) { R.clear_c[j_] = 1; R.cc[j_] = R.cc[i_]; } R.clear_c[i_] = 0; } } }
@@ -319,7 +320,7 @@ int totk_wb_fence_on(void);
 #define BOTW_LATE_FILTER(list, nl)
 #define BOTW_LATE_DROP(lo, hi)
 #define UNCAPPED_INTERVAL_FROM_ENV(e) e && atoi(e)
-#define BOTW_RT_DUP_CLEARS()
+#define BOTW_RT_DUP_CLEARS() rt_dup_share_clears();
 #define BOTW_RT_DUP_SKIP(i)
 #define BOTW_RT_DUP_PREDICT(r, cf)
 #define BOTW_RT_DUP_CLEAR_TO_FIRST(c)
