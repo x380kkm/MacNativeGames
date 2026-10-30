@@ -4591,9 +4591,9 @@ static unsigned rt_dup_other_slots(const p_set_rt *r, int slot) {
 }
 /* A full clear kept for the next pass, one per slot. On the Switch each clear writes memory in turn, so the later of two
    clears of one image through different slots stands: it goes to every slot of the image at once, over the earlier one.
-   clear_c and cc: the eight flags and colours it is kept in, r: the targets it was recorded against. */
+   With the rule off it stays on its own slot, and a Breath of the Wild build sorts the slots out when the pass begins
+   (BOTW_RT_DUP_CLEARS). clear_c and cc: the eight flags and colours it is kept in, r: the targets it was recorded against. */
 static void rt_dup_pend_clear(const p_set_rt *r, const p_clear_color *c, uint8_t *clear_c, MTLClearColor *cc) {
-    BOTW_RT_DUP_CLEAR_TO_FIRST(r, c)
     unsigned slots = rt_dup_other_slots(r, c->index) | 1u << c->index;
     for (int i = 0; i < 8; i++) if (slots >> i & 1) { clear_c[i] = 1; cc[i] = MTLClearColorMake(c->rgba[0], c->rgba[1], c->rgba[2], c->rgba[3]); }
 }
@@ -12112,7 +12112,7 @@ static void clear_quad_core(id<MTL4RenderCommandEncoder> en, const uint32_t cfmt
     enc_r_draw(en, MTLPrimitiveTypeTriangle, 0, 3);
 }
 static void clear_quad(const p_clear_color *c) {
-    gpu_path_on("TOTK_GPU_MIDCLEAR", "mid-pass / partial-mask / scissored color clear"); BOTW_RT_DUP_CLEAR_TO_FIRST(&R.rt, c)
+    gpu_path_on("TOTK_GPU_MIDCLEAR", "mid-pass / partial-mask / scissored color clear"); BOTW_RT_DUP_CLEAR_TO_FIRST(c)
     const tex_t *t = R.rt.color[c->index];
     int f = R.rt.has_cview[c->index] && R.rt.cview[c->index].set_format ? R.rt.cview[c->index].format : t->d.format;
     if (cls_of(f)) MDIE("partial color clear of integer render target format %#x not implemented", f);

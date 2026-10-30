@@ -179,12 +179,19 @@ static void clears_off(void) {
     CHECK(R.clear_c[0] && R.clear_c[2] && R.cc[0].red == 0.25 && R.cc[2].red == 0.75);
 }
 #else
-/* Breath of the Wild attaches the first slot only, so a clear of either goes there, and the later one stands. */
-static void later_clear_botw(void) {
-    pass(3); clear_through(0, 0.25f); clear_through(2, 0.75f); BOTW_RT_DUP_CLEARS()
-    CHECK(R.clear_c[0] && !R.clear_c[2] && R.cc[0].red == 0.75);
+/* Breath of the Wild attaches the first slot only. A clear stays on the slot it came through until the pass begins, and one
+   of the slot left unattached then goes to the first slot unless that slot has a clear of its own, so the first slot's
+   clear stands whichever came later. */
+static void clears_botw(void) {
+    pass(3); clear_through(0, 0.25f); clear_through(2, 0.75f);
+    CHECK(R.clear_c[0] && R.clear_c[2] && R.cc[0].red == 0.25 && R.cc[2].red == 0.75);
+    BOTW_RT_DUP_CLEARS()
+    CHECK(R.clear_c[0] && !R.clear_c[2] && R.cc[0].red == 0.25);
     pass(3); clear_through(2, 0.75f); clear_through(0, 0.25f); BOTW_RT_DUP_CLEARS()
     CHECK(R.clear_c[0] && !R.clear_c[2] && R.cc[0].red == 0.25);
+    /* a clear of the unattached slot alone goes to the first */
+    pass(3); clear_through(2, 0.75f); BOTW_RT_DUP_CLEARS()
+    CHECK(R.clear_c[0] && !R.clear_c[2] && R.cc[0].red == 0.75);
     /* slot 1 holds another image */
     pass(3); clear_through(1, 0.5f); clear_through(2, 0.25f); BOTW_RT_DUP_CLEARS()
     CHECK(R.clear_c[0] && R.clear_c[1] && !R.clear_c[2] && R.cc[0].red == 0.25 && R.cc[1].red == 0.5);
@@ -201,7 +208,7 @@ int main(int argc, char **argv) {
 #ifndef GAME_BOTW
     if (expected_on) { clears_on(); other_slots_on(); later_clear_on(); } else clears_off();
 #else
-    later_clear_botw();
+    clears_botw();
 #endif
     printf(fails ? "rt dup FAILED\n" : "rt dup ok\n");
     return fails != 0;

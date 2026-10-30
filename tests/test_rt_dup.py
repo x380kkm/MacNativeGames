@@ -60,6 +60,7 @@ class OneImageAtTwoSlots(unittest.TestCase):
 
     def test_off_in_a_breath_of_the_wild_build(self):
         self.expect(self.probe('-DIOS_BUILD=1', '-DGAME_BOTW=1'), 'off')
+        self.expect(self.probe('-DIOS_BUILD=0', '-DGAME_BOTW=1'), 'off')
 
     def test_both_store_paths_ask_the_rule(self):
         finish = production(r'static void sd_finish\(void\) \{.*?\n}\n')
@@ -106,6 +107,7 @@ class OneImageAtTwoSlots(unittest.TestCase):
 
     def test_a_mid_pass_clear_reaches_the_other_tile_copies(self):
         clear = production(r'static void clear_quad\(const p_clear_color \*c\) \{.*?\n}\n')
+        self.assertIn('BOTW_RT_DUP_CLEAR_TO_FIRST(c)', clear)   # Breath of the Wild left the slot unattached: the first slot takes it
         self.assertIn('unsigned others = rt_dup_other_slots(&R.rt, c->index);\n'
                       '    for (int i = 0; i < 8; i++) if ((others >> i & 1) && g_pass.cfmt[i])\n'
                       '        clear_quad_core(en, g_pass.cfmt, g_pass.hd ? g_pass.dfmt : 0, g_pass.hs ? g_pass.sfmt : 0, '
