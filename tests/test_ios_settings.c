@@ -176,6 +176,11 @@ int main(int argc, char **argv) {
         totk_frame_button_target(0) != 30 || totk_frame_button_target(1) != 60) {
         failures++; fprintf(stderr, "the in-game frame-rate button mapping is wrong\n");
     }
+    /* The start screen: both preset rows, the frame rate alone without Full HD, only Play with the custom layer on. */
+    if (totk_start_first_row(0, 1) != 0 || totk_start_first_row(0, 0) != 1 || totk_start_first_row(1, 1) != 2 ||
+        totk_start_first_row(1, 0) != 2) {
+        failures++; fprintf(stderr, "the start screen shows the wrong rows\n");
+    }
 
     /* Large textures, outside both layers: "save" leaves the runtime's defaults (TOTK_MIP_KEEP 1, the top level left out
        on iOS), "more" keeps the textures sampled at a chosen level too, "full" keeps every level. */

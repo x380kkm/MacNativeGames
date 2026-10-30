@@ -212,5 +212,14 @@ class StartScreen(unittest.TestCase):
             self.assertIn(key, screen)
         self.assertNotIn('PLAYSHELF', screen.upper(), 'no launcher name on the game\'s screen')
 
+    def test_custom_settings_leave_only_the_button(self):
+        """The presets do not apply with the pane's custom layer on (apply_display_settings), so the screen leaves their rows
+        out, the controller's focus stays off them and they are not saved. test_ios_settings.c checks the rule for the rows."""
+        screen = (TOOLS.parent/'Sources/start_screen.m').read_text(encoding='utf-8')
+        self.assertIn('_firstRow = totk_start_first_row([d boolForKey:@"TOTK_CUSTOM_PICTURE"], [self settingsPaneHas:@"TOTK_DOCKED"]);', screen)
+        self.assertIn(': _firstRow == 1 ? @[icon, title, fpsRow, _start] : @[icon, title, _start];', screen)
+        self.assertIn('if (up) _row = MAX(_firstRow, _row - 1);', screen)
+        self.assertIn('if (_firstRow < 2) [self changed];', screen)
+
 if __name__ == '__main__':
     unittest.main()

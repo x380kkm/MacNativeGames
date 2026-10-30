@@ -62,3 +62,8 @@ totk_key_layer totk_key_layer_of(const char *key);
    keeps the cap in the pane, so the button only holds 30 until the next launch and saves nothing (NULL). */
 const char *totk_frame_button_key(int custom);
 int totk_frame_button_target(int held30);   /* 30 or the normal rate (60); the runtime only knows 30 or not-30 */
+
+/* The first row the start screen shows, of 0 the picture, 1 the frame rate, 2 Play (start_screen.m). The first two are the
+   presets, which do not apply with the custom layer on (custom 1), so only Play is left then. has_picture: the pane has
+   Full HD. */
+int totk_start_first_row(int custom, int has_picture);

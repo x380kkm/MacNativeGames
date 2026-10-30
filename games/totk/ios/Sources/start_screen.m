@@ -1,5 +1,6 @@
 #import "start_screen.h"
 #import <GameController/GameController.h>
+#include "settings_map.h"
 #include "totk_ui_lang.h"
 
 static BOOL zh(void) { return totk_ui_zh(); }   // the language of the host's other text (boot screen, overlays; TOTK_UI_LANG overrides)
@@ -10,9 +11,9 @@ static NSString *T(NSString *z, NSString *e) { return zh() ? z : e; }
     UISegmentedControl *_picture, *_fps;
     UIButton *_start;
     NSInteger _row;          // 0 picture, 1 frame rate, 2 start (controller focus)
+    NSInteger _firstRow;     // the first of those the screen shows (totk_start_first_row)
     NSTimer *_poll;
     BOOL _held, _done;       // a controller button or direction held since the last poll
-    BOOL _hasPicture;        // the game's Settings pane has Full HD (docked): the picture row is shown
 }
 
 - (instancetype)initWithFrame:(CGRect)frame onStart:(void (^)(void))onStart {
@@ -48,7 +49,7 @@ static NSString *T(NSString *z, NSString *e) { return zh() ? z : e; }
     }
     UIStackView *pictureRow = [self row:T(@"画面", @"Picture") control:_picture];
     UIStackView *fpsRow = [self row:T(@"帧率", @"Frame rate") control:_fps];
-    _hasPicture = [self settingsPaneHas:@"TOTK_DOCKED"];
+    _firstRow = totk_start_first_row([d boolForKey:@"TOTK_CUSTOM_PICTURE"], [self settingsPaneHas:@"TOTK_DOCKED"]);
 
     UILabel *note = [UILabel new];
 #ifdef GAME_BOTW
@@ -70,7 +71,8 @@ static NSString *T(NSString *z, NSString *e) { return zh() ? z : e; }
         NSMutableDictionary *m = a.mutableCopy; m[NSFontAttributeName] = [UIFont systemFontOfSize:20 weight:UIFontWeightSemibold]; return m; };
     _start = [UIButton buttonWithConfiguration:cfg primaryAction:[UIAction actionWithHandler:^(UIAction *a) { (void)a; [self start]; }]];
 
-    NSArray<UIView *> *rows = _hasPicture ? @[icon, title, pictureRow, fpsRow, note, _start] : @[icon, title, fpsRow, _start];
+    NSArray<UIView *> *rows = _firstRow == 0 ? @[icon, title, pictureRow, fpsRow, note, _start]
+                            : _firstRow == 1 ? @[icon, title, fpsRow, _start] : @[icon, title, _start];
     UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:rows];
     stack.axis = UILayoutConstraintAxisVertical; stack.alignment = UIStackViewAlignmentCenter; stack.spacing = 18;
     [stack setCustomSpacing:28 afterView:title]; [stack setCustomSpacing:26 afterView:note];
@@ -122,7 +124,7 @@ static NSString *T(NSString *z, NSString *e) { return zh() ? z : e; }
     if (_done) return;
     _done = YES;
     [_poll invalidate]; _poll = nil;
-    [self changed];
+    if (_firstRow < 2) [self changed];   // with no row shown nothing was picked, and the presets' rows stay as they are
     void (^go)(void) = _onStart; _onStart = nil;
     [UIView animateWithDuration:0.25 animations:^{ self.alpha = 0; } completion:^(BOOL f) { (void)f; [self removeFromSuperview]; }];
     if (go) go();
@@ -130,7 +132,7 @@ static NSString *T(NSString *z, NSString *e) { return zh() ? z : e; }
 
 /* The controller's focus: a ring around the row it moves. */
 - (void)focus {
-    NSArray<UIView *> *rows = @[_picture, _fps, _start];   // _row 0 is never focused without the picture row
+    NSArray<UIView *> *rows = @[_picture, _fps, _start];   // a row the screen leaves out is never focused (_firstRow)
     for (NSUInteger i = 0; i < rows.count; i++) {
         rows[i].layer.borderWidth = (NSInteger)i == _row ? 2 : 0;
         rows[i].layer.borderColor = [UIColor colorWithRed:0.10 green:0.63 blue:1.0 alpha:1].CGColor;
@@ -149,7 +151,7 @@ static NSString *T(NSString *z, NSString *e) { return zh() ? z : e; }
     if (!any) { _held = NO; return; }
     if (_held) return;
     _held = YES;
-    if (up) _row = MAX(_hasPicture ? 0 : 1, _row - 1);
+    if (up) _row = MAX(_firstRow, _row - 1);
     else if (down) _row = MIN(2, _row + 1);
     else if ((left || right) && _row < 2) {
         UISegmentedControl *s = _row == 0 ? _picture : _fps;

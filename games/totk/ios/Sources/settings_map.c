@@ -77,6 +77,7 @@ totk_key_layer totk_key_layer_of(const char *key) {
 
 const char *totk_frame_button_key(int custom) { return custom ? NULL : "TOTK_PHONE_FPS"; }
 int totk_frame_button_target(int held30) { return held30 ? 60 : 30; }
+int totk_start_first_row(int custom, int has_picture) { return custom ? 2 : has_picture ? 0 : 1; }
 
 /* 720p with the 960x540 scene is the combination that keeps 60 fps the longest on an iPad before the SoC throttles,
    and it is the coolest (measured 2026-10-23: GPU 12.9 ms at 960x540 against 26.2 ms at 1280x720 on the same draw
