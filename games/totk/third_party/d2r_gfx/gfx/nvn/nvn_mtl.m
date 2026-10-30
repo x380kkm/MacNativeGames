@@ -4588,9 +4588,11 @@ static unsigned rt_dup_other_slots(const p_set_rt *r, int slot) {
     return others;
 }
 /* Marks a slot a draw wrote through (rt_dup_unstored): its channels are not masked off and the fragment shader outputs to
-   it. A shader without reflection has colour mask 0, and then the channel mask decides. */
-static void rt_dup_note_draw(sd_att *t, uint32_t channel_mask, uint32_t shader_color_mask) {
-    if (!t->depth && ((channel_mask >> (4 * t->idx)) & 0xf) && (!shader_color_mask || (shader_color_mask >> t->idx & 1))) t->drawn = 1;
+   it. Open channels alone say nothing: a depth-only shader leaves them as they are, and marking its slots would keep a
+   copy no colour reached over the one that holds the pass. A shader whose reflection lists no outputs (colors_listed 0)
+   leaves it to the channel mask. */
+static void rt_dup_note_draw(sd_att *t, uint32_t channel_mask, uint32_t color_outputs, int colors_listed) {
+    if (!t->depth && ((channel_mask >> (4 * t->idx)) & 0xf) && (!colors_listed || (color_outputs >> t->idx & 1))) t->drawn = 1;
 }
 static int rt_dup_unstored(const sd_att *t) {
     if (t->depth || !rt_dup_on()) return 0;
@@ -5402,7 +5404,7 @@ static int sh_has_src(NvShader *s) { return s && (s->src || s->src_path); }
 @interface NvProg : NSObject { @public NvShader *sh[6];
     // TOTK: translation inputs and the variant per bound-state signature (prog_fit)
     const uint8_t *ctl[6], *code[6]; NSString *key[6]; uint64_t sig[6]; NSMutableDictionary<NSNumber *, NvShader *> *alt[6];
-    void *udc_sh[6]; uint8_t udc_ok, udc_img, udc_imgw; uint32_t udc_cmask;   // udc_*: udc_note_draw's summary of sh[] (valid while sh[] is the same)
+    void *udc_sh[6]; uint8_t udc_ok, udc_img, udc_imgw, udc_colors, udc_colors_listed; uint32_t udc_cmask;   // udc_*: udc_note_draw's summary of sh[] (valid while sh[] is the same)
     void *ar_sh[6]; uint8_t ar_n, ar_st[32], ar_reg[32], ar_img[32];   // ar_*: draw_att_reads' sampled texture / image slots of sh[] (valid while sh[] is the same; ar_n 255 = more than 32, scan the bindings)
     int missing, miss_has[2]; uint64_t miss_sig[2]; int exp_skip;
     int keeps; uint64_t miss_gen; } @end   // TOTK (iOS, Mac async shaders): missing = stages whose variant is not translated yet; miss_sig: signature whose variant is missing (prog_fit); exp_skip: TOTK_EXP_SKIP_FS decision (0 unknown, 1 keep, 2 skip); keeps: a stage stores to memory or streams out (sph_keeps_memory), its draws are never skipped; miss_gen: totk_rt_ready_gen() when a stage was last found missing
@@ -6855,18 +6857,17 @@ static void udc_note_draw(NvProg *pr) {
        and kept on it (two loops over every binding of every stage on every draw before). */
     if (pr && pr->udc_ok) for (int st = 0; st < 6; st++) if (pr->udc_sh[st] != (__bridge void *)pr->sh[st]) { pr->udc_ok = 0; break; }
     if (pr && !pr->udc_ok) {
-        int img = 0, imgw = 0; uint32_t cm = 0;
+        int img = 0, imgw = 0; uint32_t cm = 0; uint8_t colors = 0, listed = 1;   // without a fragment stage: no colour output
         for (int st = 0; st < 6; st++) { __unsafe_unretained NvShader *sh = pr->sh[st]; pr->udc_sh[st] = (__bridge void *)sh; if (!sh) continue;
-            if (st == 1) cm = sh->rf.color_mask;
+            if (st == 1) { cm = sh->rf.color_mask; colors = sh->rf.color_outputs; listed = sh->rf.colors_listed; }
             for (int i = 0; i < sh->rf.nb; i++) if (sh->rf.b[i].kind == NVN_RB_IMG) { img = 1; if (sh->rf.b[i].rw) imgw = 1; } }
-        pr->udc_img = (uint8_t)img; pr->udc_imgw = (uint8_t)imgw; pr->udc_cmask = cm; pr->udc_ok = 1;
+        pr->udc_img = (uint8_t)img; pr->udc_imgw = (uint8_t)imgw; pr->udc_cmask = cm; pr->udc_colors = colors; pr->udc_colors_listed = listed; pr->udc_ok = 1;
     }
     if (pr && pr->udc_img) zskip_clear();   // 图像槽可写：保守清空 | Image slots are writable: conservatively clear
     int image_write = pr ? pr->udc_imgw : 0;
     uint32_t shader_color_mask = pr ? pr->udc_cmask : 0;
     for (int i = 0; i < g_nsd; i++) {
         sd_att *t = &g_sd[i];
-        rt_dup_note_draw(t, S.chmask.mask, shader_color_mask);
         if (image_write) { t->wrote = 1; t->wwhy = 1; }
         else if (t->depth == 0 && t->idx >= 0 && (((S.chmask.mask >> (4 * t->idx)) & 0xf) || (shader_color_mask >> t->idx & 1))) { t->wrote = 1; t->wwhy = (S.chmask.mask >> (4 * t->idx)) & 0xf ? 2 : 3; }
         else if (t->depth == 1 && S.ds.dw) { t->wrote = 1; t->wwhy = 4; }
@@ -6874,6 +6875,12 @@ static void udc_note_draw(NvProg *pr) {
                 && (S.ds.fail_f != NVN_STENCIL_OP_KEEP || S.ds.zfail_f != NVN_STENCIL_OP_KEEP || S.ds.zpass_f != NVN_STENCIL_OP_KEEP
                     || S.ds.fail_b != NVN_STENCIL_OP_KEEP || S.ds.zfail_b != NVN_STENCIL_OP_KEEP || S.ds.zpass_b != NVN_STENCIL_OP_KEEP)) { t->wrote = 1; t->wwhy = 5; }
     }
+}
+/* A draw's primitives are in the encoder: the slots it wrote through (rt_dup_note_draw). Beside each encode call of
+   draw_inner, past the exits that drop a draw and the checks for no primitives: a draw that puts nothing on screen must not
+   decide which copy is stored. udc_note_draw has run for this draw, so the summary on pr is current. */
+static void rt_dup_note_encoded(__unsafe_unretained NvProg *pr) {
+    for (int i = 0; i < g_nsd; i++) rt_dup_note_draw(&g_sd[i], S.chmask.mask, pr->udc_colors, pr->udc_colors_listed);
 }
 static void state_reset(void) {
     memset(&S, 0, sizeof S);
@@ -13429,6 +13436,7 @@ frz_plain:;
                 (NSInteger)dw->first + (NSInteger)at * 2, dw->base_instance);
             at += n;
         }
+        if (quads) rt_dup_note_encoded(pr);
         static int once; if (quads && !once++) MLOG("NVN quad strip: %d vertices converted to %u quads", dw->count, quads);
     } else if (dw && prim == 7) {   // 四边形：共享索引 0,1,2,0,2,3 | Quads: shared indices 0,1,2,0,2,3
         if (!g_quad_ib) {
@@ -13436,10 +13444,10 @@ frz_plain:;
             for (uint32_t q = 0; q < n; q++) { uint32_t b = q * 4; uint32_t v[6] = {b, b + 1, b + 2, b, b + 2, b + 3}; memcpy(ix + q * 6, v, 24); }
             g_quad_ib = [g_dev newBufferWithBytes:ix length:n * 24 options:MTLResourceStorageModeShared]; g_quad_gpu = g_quad_ib.gpuAddress; res_add(g_quad_ib); free(ix);
         }
-        if (dw->count >= 4) enc_r_draw_indexed(en, mp, (dw->count / 4) * 6, MTLIndexTypeUInt32, g_quad_gpu, g_quad_ib.length, dw->instances > 1 ? dw->instances : 1, dw->first, dw->base_instance);
+        if (dw->count >= 4) { enc_r_draw_indexed(en, mp, (dw->count / 4) * 6, MTLIndexTypeUInt32, g_quad_gpu, g_quad_ib.length, dw->instances > 1 ? dw->instances : 1, dw->first, dw->base_instance); rt_dup_note_encoded(pr); }
     } else if (dw) {
-        if (dw->count && (dw->instances > 1 || dw->base_instance)) enc_r_draw_instanced(en, mp, dw->first, dw->count, dw->instances, dw->base_instance);
-        else if (dw->count && dw->instances >= 0) enc_r_draw(en, mp, dw->first, dw->count);
+        if (dw->count && (dw->instances > 1 || dw->base_instance)) { enc_r_draw_instanced(en, mp, dw->first, dw->count, dw->instances, dw->base_instance); rt_dup_note_encoded(pr); }
+        else if (dw->count && dw->instances >= 0) { enc_r_draw(en, mp, dw->first, dw->count); rt_dup_note_encoded(pr); }
     } else {
         if (prim == 7) { RED_ONCE(20, "带索引的四边形未实现"); vis_count_lost(); return; }
         if (prim == NVN_DRAW_PRIMITIVE_QUAD_STRIP) {
@@ -13463,9 +13471,9 @@ frz_plain:;
             size_t converted_offset = arena_alloc(length, &converted);
             uint32_t *out = (uint32_t *)((uint8_t *)converted.contents + converted_offset);
             size_t count = nvn_quad_strip_indexed(out, indices + offset, (uint32_t)di->count, width);
-            if (count) enc_r_draw_indexed(en, mp, count, MTLIndexTypeUInt32,
+            if (count) { enc_r_draw_indexed(en, mp, count, MTLIndexTypeUInt32,
                 converted.gpuAddress + converted_offset, length, di->instances ? di->instances : 1,
-                di->base_vertex, di->base_instance);
+                di->base_vertex, di->base_instance); rt_dup_note_encoded(pr); }
             static int once; if (count && !once++) MLOG("NVN indexed quad strip: %d %u-bit indices converted to %zu triangles",
                 di->count, width * 8, count / 3);
             return;
@@ -13489,12 +13497,12 @@ frz_plain:;
                   const uint16_t *w16 = (const uint16_t *)((const uint8_t *)wide.contents + woff);
                   MLOG("HILITE draw: 8-bit index path %s, count %d, first 6 widened indices %u %u %u %u %u %u, source %#llx", wi >= 0 ? "GPU-widened (cached)" : "CPU-widened", di->count,
                        w16[0], w16[1], w16[2], w16[3], w16[4], w16[5], (unsigned long long)di->ibuf); } }
-            if (di->count) enc_r_draw_indexed(en, mp, di->count, MTLIndexTypeUInt16, wide.gpuAddress + woff, (size_t)di->count * 2, di->instances ? di->instances : 1, di->base_vertex, di->base_instance);
+            if (di->count) { enc_r_draw_indexed(en, mp, di->count, MTLIndexTypeUInt16, wide.gpuAddress + woff, (size_t)di->count * 2, di->instances ? di->instances : 1, di->base_vertex, di->base_instance); rt_dup_note_encoded(pr); }
             return;
         }
         use_rec("buf", di->ibuf, (uint64_t)di->count * (di->itype == 1 ? 2 : 4), 0, NULL);
-        if (di->count) enc_r_draw_indexed(en, mp, di->count, di->itype == 1 ? MTLIndexTypeUInt16 : MTLIndexTypeUInt32, gpu, ((__bridge id<MTLBuffer>)mb).length - mo,
-                di->instances ? di->instances : 1, di->base_vertex, di->base_instance);
+        if (di->count) { enc_r_draw_indexed(en, mp, di->count, di->itype == 1 ? MTLIndexTypeUInt16 : MTLIndexTypeUInt32, gpu, ((__bridge id<MTLBuffer>)mb).length - mo,
+                di->instances ? di->instances : 1, di->base_vertex, di->base_instance); rt_dup_note_encoded(pr); }
     }
     if (g_rt_range_pending) { PD("j rt_level_range pass=%llu vc=%u", g_stat_pass, (unsigned)(dw ? dw->count : di->count)); g_rt_range_pending=0; }
 }

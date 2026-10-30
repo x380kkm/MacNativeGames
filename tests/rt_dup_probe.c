@@ -26,29 +26,36 @@ static void attach(int slot, uint64_t serial, uint32_t level, uint32_t layer, in
 static int unstored(int i) { return rt_dup_unstored(&g_sd[i]); }
 #define CHANNELS(slot) (0xfu << (4 * (slot)))   /* every channel of a slot in a channel mask */
 
-static int noted(int slot, uint32_t channel_mask, uint32_t shader_color_mask) {
+static int noted(int slot, uint32_t channel_mask, uint32_t color_outputs, int colors_listed) {
     sd_att a = {0}; a.idx = slot;
-    rt_dup_note_draw(&a, channel_mask, shader_color_mask);
+    rt_dup_note_draw(&a, channel_mask, color_outputs, colors_listed);
     return a.drawn;
+}
+/* A draw that reached the encoder, on every entry of g_sd: rt_dup_note_encoded. A draw with no primitives or one the replay
+   drops never gets there (test_rt_dup.py keeps each encode call beside its mark). */
+static void draw_through(uint32_t channel_mask, uint32_t color_outputs, int colors_listed) {
+    for (int i = 0; i < g_nsd; i++) rt_dup_note_draw(&g_sd[i], channel_mask, color_outputs, colors_listed);
 }
 
 /* What a draw leaves on a slot. This bookkeeping runs with the rule on and off. */
 static void draw_notes(void) {
-    CHECK(noted(2, CHANNELS(2), 1u << 2));
+    CHECK(noted(2, CHANNELS(2), 1u << 2, 1));
     /* one channel is enough, and the last slot is a slot */
-    CHECK(noted(2, 1u << 8, 1u << 2));
-    CHECK(noted(7, CHANNELS(7), 1u << 7));
+    CHECK(noted(2, 1u << 8, 1u << 2, 1));
+    CHECK(noted(7, CHANNELS(7), 1u << 7, 1));
     /* the slot's channels are masked off, or the shader does not output to it */
-    CHECK(!noted(2, ~CHANNELS(2), 1u << 2));
-    CHECK(!noted(2, CHANNELS(2), 1u << 1));
-    /* a shader without reflection: the channel mask decides */
-    CHECK(noted(2, CHANNELS(2), 0));
-    CHECK(!noted(2, ~CHANNELS(2), 0));
+    CHECK(!noted(2, ~CHANNELS(2), 1u << 2, 1));
+    CHECK(!noted(2, CHANNELS(2), 1u << 1, 1));
+    /* a shader that lists no output writes no colour, with every channel open */
+    CHECK(!noted(2, ~0u, 0, 1));
+    /* a shader that lists nothing either way: the channel mask decides */
+    CHECK(noted(2, CHANNELS(2), 0, 0));
+    CHECK(!noted(2, ~CHANNELS(2), 0, 0));
     /* the depth and stencil planes are not colour slots */
-    { sd_att a = {0}; a.idx = -1; a.depth = 1; rt_dup_note_draw(&a, ~0u, 0); CHECK(!a.drawn); }
-    { sd_att a = {0}; a.idx = 0; a.depth = 2; rt_dup_note_draw(&a, ~0u, 0); CHECK(!a.drawn); }
+    { sd_att a = {0}; a.idx = -1; a.depth = 1; rt_dup_note_draw(&a, ~0u, 0, 0); CHECK(!a.drawn); }
+    { sd_att a = {0}; a.idx = 0; a.depth = 2; rt_dup_note_draw(&a, ~0u, 0, 0); CHECK(!a.drawn); }
     /* a later draw with the slot masked off does not take the mark back */
-    { sd_att a = {0}; a.idx = 1; rt_dup_note_draw(&a, CHANNELS(1), 0); rt_dup_note_draw(&a, 0, 0); CHECK(a.drawn); }
+    { sd_att a = {0}; a.idx = 1; rt_dup_note_draw(&a, CHANNELS(1), 0, 0); rt_dup_note_draw(&a, 0, 0, 0); CHECK(a.drawn); }
 }
 
 static void stores_on(void) {
@@ -79,8 +86,23 @@ static void stores_on(void) {
     CHECK(!unstored(0) && !unstored(1));
     /* the mark a draw leaves decides: a draw through the second slot alone stores that one */
     g_nsd = 0; attach(0, 1, 0, 0, 0); attach(2, 1, 0, 0, 0);
-    for (int i = 0; i < g_nsd; i++) rt_dup_note_draw(&g_sd[i], CHANNELS(2), 0);
+    draw_through(CHANNELS(2), 1u << 2, 1);
     CHECK(unstored(0) && !unstored(1));
+    /* a draw with no colour output and both slots' channels open marks neither, so the later draw through the second slot
+       still decides, and the copy holding the pass is stored */
+    g_nsd = 0; attach(0, 1, 0, 0, 0); attach(2, 1, 0, 0, 0);
+    draw_through(CHANNELS(0) | CHANNELS(2), 0, 1);
+    CHECK(!unstored(0) && unstored(1));
+    draw_through(CHANNELS(2), 1u << 2, 1);
+    CHECK(unstored(0) && !unstored(1));
+    /* a shader that outputs through the second slot only: open channels on the first do not make it the one drawn */
+    g_nsd = 0; attach(0, 1, 0, 0, 0); attach(2, 1, 0, 0, 0);
+    draw_through(CHANNELS(0) | CHANNELS(2), 1u << 2, 1);
+    CHECK(unstored(0) && !unstored(1));
+    /* no list of outputs: both slots' channels open marks both, and the first is stored */
+    g_nsd = 0; attach(0, 1, 0, 0, 0); attach(2, 1, 0, 0, 0);
+    draw_through(CHANNELS(0) | CHANNELS(2), 0, 0);
+    CHECK(!unstored(0) && unstored(1));
 }
 
 static void stores_off(void) {
