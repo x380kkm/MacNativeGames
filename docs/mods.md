@@ -192,7 +192,8 @@ manifest by hand.
 
 Nothing changes at run time: the game loads this folder and its manifest as before. An iPhone / iPad / Vision Pro
 app loads its player mod folder from its own `Documents/mods/<version>` when that folder holds a `manifest.tsv`, or
-from `Documents/mods/<version>-<slot>` when its Settings row names a slot whose folder holds one
+from `Documents/mods/<version>-<slot>` when Settings › Apps › Tears of the Kingdom › Mods › Durability and battery is set
+to a value whose folder holds one
 (`games/totk/ios/Sources/main.m`; an app whose runtime was built before commit bd81859 loads none). Those folders are in
 the app's container on the device, which a build cannot fill, so there `--mod` merges the code patches only and
 `--install-mod-romfs` is refused. `games/totk/ios/tools/push_device_windows.py push-mod` copies a mod folder and its
@@ -301,19 +302,24 @@ bottleneck). A Mac with less memory than that is not expected to run it.
 ### Equipment durability and the Zonai battery: `make_gameplay_tuning.py`
 
 `games/totk/scripts/make_gameplay_tuning.py` makes a RomFS mod from your own RomFS that lets weapons, shields and bows
-last longer and changes how fast the Zonai battery drains and recharges. It needs no build, only Python 3.14. This is a
-gameplay change. Upstream's app has neither the folders nor the Settings row described here, so it plays as shipped. In
+last longer and changes how fast the Zonai battery drains and recharges. It runs on its own with Python 3.14, but it reads
+a RomFS that a build extracted: `--romfs` takes a folder holding both `romfs.bin` and `runtime-index.bin`, which is a
+build's `extracted/<version>/romfs` or the same folder in an app (`Contents/Resources/totk/extracted/<version>/romfs`). An
+app built with `--mac-game-data library` keeps its image apart from that folder, so use the build's work folder for it. This
+is a gameplay change. Upstream's app has neither the folders nor the Settings row described here, so it plays as shipped. In
 this fork the row exists on the iPhone and iPad with `strong` as its default; it has an effect only once that folder is
 on the device.
 
 | Option | What it edits | Limits |
 | --- | --- | --- |
-| `--durability K` | `MaxLife` times K in `Life/LifeParameters/Weapon_{Sword,Lsword,Spear,Shield,Bow}_*` of every pack that carries one (206 packs in 1.4.3) and in the rows of those 206 actors in `RSDB/GameActorInfo`; whole numbers from 1 to 100000 | Only items obtained after the mod is in: a save keeps each item's durability. A community report on 1.1.x says the Master Sword goes back to its normal value after it recharges. |
+| `--durability K` | `MaxLife` times K in `Life/LifeParameters/Weapon_{Sword,Lsword,Spear,Shield,Bow}_*` of every pack that carries one (206 packs in 1.4.3) and in the rows of those 206 actors in `RSDB/GameActorInfo`; the results are whole numbers from 1 to 100000 | Only items obtained after the mod is in: a save keeps each item's durability. A community report on 1.1.x says the Master Sword goes back to its normal value after it recharges. |
 | `--battery-drain D` | every entry of `ZonauEnergy_CostRate` divided by D, in `Pack/Actor/Player.pack.zs`, member `Component/ConditionParam/Player.game__component__ConditionParam.bgyml` (index 0 is very likely the rate without Zonaite armor, the others its levels) | The number of battery cells is saved (`PlayerStatus.MaxEnergy`) and stays. The game's code rounds a device's drain to whole units per second. The slowest device found uses 15, so at D = 5 the three Zonaite armor levels all drain 2 per second with it, and a D above 15 could round its drain to nothing at the last level. |
 | `--battery-recharge R` | every entry of `ZonauEnergy_HealRate` times R, in the same member (index 1 is very likely the Zonaite armor set bonus) | The game's code does `energy += MaxEnergy / 3000 * (rate * 150) * dt`, so with the original rate of 1 an empty battery refills in 20 seconds, taking `dt` as seconds, and in 20 / R seconds with this option. The pause before the battery recharges is a constant in the code and stays. |
 
+K, D and R are numbers from 0.1 to 100.
+
 ```bash
-python3.14 games/totk/scripts/make_gameplay_tuning.py --romfs <folder of romfs.bin> --into <mod folder> \
+python3.14 games/totk/scripts/make_gameplay_tuning.py --romfs <folder with romfs.bin and runtime-index.bin> --into <mod folder> \
   --durability 5 --battery-drain 3 --battery-recharge 3
 ```
 
@@ -329,7 +335,8 @@ python3.14 games/totk/scripts/make_gameplay_tuning.py --romfs <folder of romfs.b
   `.gameplay-tuning.json` records the values; its leading dot keeps it out of the manifest and off the device.
 
 `--slots <folder> --base <mod folder>` builds the folders `<version>-off`, `-moderate`, `-strong` and `-max` from a copy of
-the base folder. An iPhone or iPad chooses between them in its Settings app; see
+the base folder. The folder may not be the base or lie inside it, and the base may not be one of the slot folders. An iPhone
+or iPad chooses between them in its Settings app; see
 [install.md](install.md#durability-and-battery-presets-on-windows). The Mac launcher does not read these folders.
 
 No option changes the wear per hit, so items you already own wear as before. `DamageRates.Durability` in
@@ -406,7 +413,8 @@ Check `grep "mods/botw160 checked" ~/Library/Logs/MacNativeGames/botw.log | tail
   The build checks what the file itself says: a `.pchtxt` is refused when its `@nsobid-` names another
   main, and an `.ips` / `.ips32` named after a build id is left out when that id is not this main's.
 - This guide covers the Mac app. An iPhone/iPad app loads a mod from its `Documents/mods/<version>`, or from
-  `Documents/mods/<version>-<slot>` when its Settings row names a slot that has a folder there;
+  `Documents/mods/<version>-<slot>` when Settings › Apps › Tears of the Kingdom › Mods › Durability and battery is
+  set to a value whose folder holds a `manifest.tsv`;
   [install.md](install.md#controller-button-icons-on-windows) shows how `push_device_windows.py push-mod` copies a mod
   folder there.
 
@@ -626,7 +634,7 @@ App 自己会替换的文件），它其实什么都没替换——这时构建�
 不带这个参数时，构建完全不碰这个目录，只打印手动执行的两条命令。
 
 运行时没有任何变化，游戏仍然在启动时加载这个目录和清单；构建只负责复制和写清单。iPhone / iPad / Vision Pro 的
-App 从自己的 `Documents/mods/<版本>` 加载玩家 mod 目录，前提是里面有 `manifest.tsv`；“设置”里的那一行选中的档位在
+App 从自己的 `Documents/mods/<版本>` 加载玩家 mod 目录，前提是里面有 `manifest.tsv`；“设置 › App › Tears of the Kingdom › 模组 › 耐久与电池”选中的档位在
 `Documents/mods/<版本>-<档位>` 有带 `manifest.tsv` 的文件夹时，改从那里加载（`games/totk/ios/Sources/main.m`；
 运行时在提交 bd81859 之前构建的 App 不加载）。这些目录在设备上 App 的容器里，构建填不了，
 所以那里 `--mod` 只合并代码补丁，`--install-mod-romfs` 会被拒绝。
@@ -714,7 +722,10 @@ mod 的 `exefs/` 里可能还有这些文件，构建这样处理：
 ### 装备耐久和 Zonai 电池：`make_gameplay_tuning.py`
 
 `games/totk/scripts/make_gameplay_tuning.py` 用你自己的 RomFS 做一个 RomFS mod，让武器、盾和弓更耐用，并改变 Zonai 电池的
-耗电和回充速度。它不需要构建，只需要 Python 3.14。这是对玩法的改动。上游的 App 既没有这里说的文件夹，也没有这里说的
+耗电和回充速度。它只要 Python 3.14 就能单独运行，但读取的是构建解出的 RomFS：`--romfs` 指向同时有 `romfs.bin` 和
+`runtime-index.bin` 的文件夹，也就是构建的 `extracted/<版本>/romfs`，或 App 里的同一个文件夹
+（`Contents/Resources/totk/extracted/<版本>/romfs`）。用 `--mac-game-data library` 构建的 App 把镜像放在这个文件夹以外，
+这时要用构建的工作目录。这是对玩法的改动。上游的 App 既没有这里说的文件夹，也没有这里说的
 “设置”行，所以按原样运行。本分支的 iPhone 和 iPad 有这一行，默认值是 `strong`；对应的文件夹在设备上时它才起作用。
 
 | 选项 | 改什么 | 限制 |
@@ -723,8 +734,10 @@ mod 的 `exefs/` 里可能还有这些文件，构建这样处理：
 | `--battery-drain D` | 把 `ZonauEnergy_CostRate` 的每一项除以 D，位于 `Pack/Actor/Player.pack.zs` 的成员 `Component/ConditionParam/Player.game__component__ConditionParam.bgyml`（下标 0 很可能是不穿 Zonaite 防具时的倍率，其余是防具的等级） | 电池格数保存在存档里（`PlayerStatus.MaxEnergy`），不变。游戏代码把设备的耗电四舍五入到每秒整数单位。目前找到的最慢的设备是每秒 15，所以 D = 5 时三个 Zonaite 防具等级用它都是每秒耗 2；D 大于 15 时，最后一级可能四舍五入到完全不耗电。 |
 | `--battery-recharge R` | 把 `ZonauEnergy_HealRate` 的每一项乘以 R，位于同一成员（下标 1 很可能是 Zonaite 防具的套装加成） | 游戏代码执行 `energy += MaxEnergy / 3000 * (rate * 150) * dt`，所以原倍率 1 时，电池从空到满需要 20 秒（按 `dt` 以秒为单位计算），用这个选项后是 20 / R 秒。回充前的等待是代码里的常量，不变。 |
 
+K、D 和 R 都是 0.1 到 100 之间的数。
+
 ```bash
-python3.14 games/totk/scripts/make_gameplay_tuning.py --romfs <romfs.bin 所在文件夹> --into <mod 文件夹> \
+python3.14 games/totk/scripts/make_gameplay_tuning.py --romfs <有 romfs.bin 和 runtime-index.bin 的文件夹> --into <mod 文件夹> \
   --durability 5 --battery-drain 3 --battery-recharge 3
 ```
 
@@ -739,7 +752,7 @@ python3.14 games/totk/scripts/make_gameplay_tuning.py --romfs <romfs.bin 所在�
   时，`--into` 指向按键图标文件夹的副本。`.gameplay-tuning.json` 记录这些数值；开头的点让它不进清单，也不会到设备上。
 
 `--slots <文件夹> --base <mod 文件夹>` 用基础文件夹的副本生成 `<版本>-off`、`-moderate`、`-strong` 和 `-max` 四个文件夹。
-iPhone 或 iPad 在“设置”App 里从中选择，见 [install.zh-CN.md](install.zh-CN.md#耐久和电池预设windows)。Mac 启动器不读这些文件夹。
+这个文件夹不能是基础文件夹，也不能在它里面；基础文件夹也不能是其中一档的文件夹。iPhone 或 iPad 在“设置”App 里从中选择，见 [install.zh-CN.md](install.zh-CN.md#耐久和电池预设windows)。Mac 启动器不读这些文件夹。
 
 没有改变每次攻击耐久损耗的选项，所以已有的物品按原来的速度磨损。`Life/DamageParameters/EquipmentCommon` 和 `ShieldCommon`
 里的 `DamageRates.Durability` 看起来像是对应的数值，但 1.4.3 的代码只在受到类型为 `Durability` 的攻击时才读它，而没有找到这样的
@@ -800,8 +813,8 @@ python3 games/totk/scripts/make_mod_manifest.py "$MODDIR" --app "/path/to/Breath
   时构建会拒绝，并同时报出这两个文件。
 - 带代码补丁的 mod，其 `exefs/` 补丁也要和构建所用的游戏版本一致。构建按文件自己写的东西核对：`.pchtxt` 的
   `@nsobid-` 不是这个 main 就拒绝；按 build id 命名的 `.ips` / `.ips32`，id 不是这个 main 就留出并提示。
-- 本文面向 Mac App。iPhone/iPad 的 App 从自己的 `Documents/mods/<版本>` 加载 mod；“设置”里的那一行选中的档位在
-  `Documents/mods/<版本>-<档位>` 有文件夹时，改从那里加载。用 `push_device_windows.py push-mod`
+- 本文面向 Mac App。iPhone/iPad 的 App 从自己的 `Documents/mods/<版本>` 加载 mod；“设置 › App › Tears of the Kingdom › 模组 › 耐久与电池”选中的档位在
+  `Documents/mods/<版本>-<档位>` 有带 `manifest.tsv` 的文件夹时，改从那里加载。用 `push_device_windows.py push-mod`
   把 mod 文件夹复制过去的方法见 [install.zh-CN.md](install.zh-CN.md#手柄按键图标windows)。
 
 ### 启动停止时

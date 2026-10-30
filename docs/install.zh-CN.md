@@ -316,7 +316,7 @@ uv pip install --offline --python <工作目录>/tools/icons-venv/Scripts/python
 python games/totk/ios/tools/push_device_windows.py push-mod <工作目录>/mods/v143-xbox --bundle-id <id>
 ```
 
-`push-mod` 先像游戏启动时那样，按大小和 SHA-256 核对 `manifest.tsv` 列出的每个文件。然后把这些文件复制到 `Documents/mods/v143`，`manifest.tsv` 最后复制，所以游戏不会加载复制了一半的 mod。复制中断后再运行，会接着已有的文件继续。`deploy … --mod <文件夹>` 在安装之后做同样的事。`status` 列出 `Documents/mods` 里的文件夹。游戏下次启动时加载 mod；但[耐久和电池预设](#耐久和电池预设windows)里选中的那一行的文件夹在设备上时，App 加载那个文件夹，所以新的图标 mod 要经过 `make_gameplay_tuning.py --slots` 和 `push-slots`。`--version` 指定别的版本的文件夹（默认 `v143`）。
+`push-mod` 先像游戏启动时那样，按大小和 SHA-256 核对 `manifest.tsv` 列出的每个文件。然后把这些文件复制到 `Documents/mods/v143`，`manifest.tsv` 最后复制，所以游戏不会加载复制了一半的 mod。复制中断后再运行，会接着已有的文件继续。`deploy … --mod <文件夹>` 在安装之后做同样的事。`status` 列出 `Documents/mods` 里的文件夹。游戏下次启动时加载 mod；但[耐久和电池预设](#耐久和电池预设windows)里选中的那个值的文件夹在设备上时，App 加载那个文件夹，所以新的图标 mod 要经过 `make_gameplay_tuning.py --slots` 和 `push-slots`。`--version` 指定别的版本的文件夹（默认 `v143`）。
 
 **删除：** `push_device_windows.py remove-mod --bundle-id <id>` 删掉 `Documents/mods/v143`，先删 `manifest.tsv`；下次启动就是 Switch 图标。设备上的档位文件夹也带着图标，所以也要删掉。在“文件”App 里删掉 `mods` 文件夹（我的 iPad › Tears of the Kingdom）会全部删除。
 
@@ -333,7 +333,7 @@ python games/totk/ios/tools/push_device_windows.py push-mod <工作目录>/mods/
 | 强（这一行的默认值） | `v143-strong` | ×5 | ÷3 | ×3 |
 | 最大 | `v143-max` | ×10 | ÷5 | ×5 |
 
-游戏只加载一个 mod 文件夹，所以每个文件夹里都带着按键图标文件，“关”就是只有图标。这是对玩法的改动。它只通过这些文件夹进入游戏，而这些文件夹是你用自己的游戏文件做的：上游的 App 没有这一行；本分支这一行的默认值是“强”，所以文件夹在设备上时，游戏按“强”运行，除非改这一行。选中的那一行没有文件夹时，App 用 `Documents/mods/v143`，这个也没有就不加载 mod。
+游戏只加载一个 mod 文件夹，所以每个文件夹里都带着按键图标文件，“关”就是只有图标。这是对玩法的改动。它只通过这些文件夹进入游戏，而这些文件夹是你用自己的游戏文件做的：上游的 App 没有这一行；本分支这一行的默认值是“强”，所以文件夹在设备上时，游戏按“强”运行，除非改这一行。选中的值没有文件夹时，App 用 `Documents/mods/v143`，这个也没有就不加载 mod。
 
 这一行和选择文件夹的代码都在 App 里。运行时所在的提交里还没有这项改动（`push_device_windows.py` 没有 `push-slots` 命令）的 App 没有这一行，也不读这些文件夹：按[没有卡带镜像和密钥](#没有卡带镜像和密钥在-windows-上用旧-ipa-重新打包)的第 4 步重新构建运行时，再按其第 5 步打包。
 
@@ -345,7 +345,7 @@ python games/totk/ios/tools/push_device_windows.py push-mod <工作目录>/mods/
 python games/totk/scripts/make_gameplay_tuning.py --romfs <工作目录>/totk/extracted/v143/romfs --slots <工作目录>/mods --base <工作目录>/mods/v143-xbox
 ```
 
-它在 `<工作目录>/mods` 里写出 `v143-off`、`v143-moderate`、`v143-strong` 和 `v143-max`。每个都是基础文件夹的副本，加上这一档的数值和自己的 `manifest.tsv`。换了图标 mod 就再运行一次：每个文件夹先在旧文件夹旁边做好，再取代它。同名文件夹不是这个脚本做的时，运行会停止。数值来自脚本里的 `SLOTS` 表。这些文件夹里的文件是用游戏自己的文件做出来的：只留在自己的电脑上，不要提交，也不要上传。
+它在 `<工作目录>/mods` 里写出 `v143-off`、`v143-moderate`、`v143-strong` 和 `v143-max`。每个都是基础文件夹的副本，加上这一档的数值和自己的 `manifest.tsv`。换了图标 mod 就再运行一次：每个文件夹先在旧文件夹旁边做好，再取代它。同名文件夹不是这个脚本为这一档做的时，运行会停止，只用 `--into` 写过的文件夹也一样。数值来自脚本里的 `SLOTS` 表。这些文件夹里的文件是用游戏自己的文件做出来的：只留在自己的电脑上，不要提交，也不要上传。
 
 **3. 复制到设备：**
 

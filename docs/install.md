@@ -317,7 +317,7 @@ On the PC this was tried on (2026-10-30), `--style xbox --faces BAXY` took 33 s 
 python games/totk/ios/tools/push_device_windows.py push-mod <work>/mods/v143-xbox --bundle-id <id>
 ```
 
-`push-mod` first checks each file `manifest.tsv` lists, by size and SHA-256, as the game does at start. It then copies those files into `Documents/mods/v143`, `manifest.tsv` last, so the game never loads a half-copied mod. A copy that stopped goes on from the files already there. `deploy … --mod <folder>` does the same after the install. `status` lists the folders in `Documents/mods`. The game loads the mod at its next start, unless the chosen row's slot folder from [Durability and battery presets](#durability-and-battery-presets-on-windows) is on the device: the app then loads that folder, so a new icon mod goes through `make_gameplay_tuning.py --slots` and `push-slots`. `--version` names another version's folder (`v143` by default).
+`push-mod` first checks each file `manifest.tsv` lists, by size and SHA-256, as the game does at start. It then copies those files into `Documents/mods/v143`, `manifest.tsv` last, so the game never loads a half-copied mod. A copy that stopped goes on from the files already there. `deploy … --mod <folder>` does the same after the install. `status` lists the folders in `Documents/mods`. The game loads the mod at its next start, unless the folder of the value chosen in [Durability and battery presets](#durability-and-battery-presets-on-windows) is on the device: the app then loads that folder, so a new icon mod goes through `make_gameplay_tuning.py --slots` and `push-slots`. `--version` names another version's folder (`v143` by default).
 
 **To remove it:** `push_device_windows.py remove-mod --bundle-id <id>` removes `Documents/mods/v143`, `manifest.tsv` first; the next start plays with the Switch icons. Slot folders on the device hold the icons too, so remove those as well. In the Files app, deleting the `mods` folder (On My iPad › Tears of the Kingdom) removes them all.
 
@@ -334,7 +334,7 @@ A RomFS mod made from your own game files can make weapons, shields and bows las
 | Strong (the row's default) | `v143-strong` | ×5 | ÷3 | ×3 |
 | Max | `v143-max` | ×10 | ÷5 | ×5 |
 
-The game loads one mod folder, so every folder also holds the button icon files, and Off is the icons alone. This is a gameplay change. It reaches the game only through these folders, which you make from your own game files: upstream's app has no such row, and in this fork the row's default is Strong, so with the folders on the device the game plays Strong until the row says otherwise. Without a folder for the chosen row the app uses `Documents/mods/v143`, and without that one it loads no mod.
+The game loads one mod folder, so every folder also holds the button icon files, and Off is the icons alone. This is a gameplay change. It reaches the game only through these folders, which you make from your own game files: upstream's app has no such row, and in this fork the row's default is Strong, so with the folders on the device the game plays Strong until the row says otherwise. Without a folder for the chosen value the app uses `Documents/mods/v143`, and without that one it loads no mod.
 
 The row and the choice of folder are in the app itself. An app whose runtime was built from a commit without them (one where `push_device_windows.py` has no `push-slots` command) has no row and ignores these folders: build the runtime again and package it, steps 4 and 5 of [Without the card image and keys](#without-the-card-image-and-keys-from-an-earlier-ipa-on-windows).
 
@@ -346,7 +346,7 @@ The row and the choice of folder are in the app itself. An app whose runtime was
 python games/totk/scripts/make_gameplay_tuning.py --romfs <work>/totk/extracted/v143/romfs --slots <work>/mods --base <work>/mods/v143-xbox
 ```
 
-It writes `v143-off`, `v143-moderate`, `v143-strong` and `v143-max` into `<work>/mods`. Each one is a copy of the base folder with its slot's values and its own `manifest.tsv`. Run it again after a new icon mod: each folder is built beside the old one and then takes its place. A folder of that name the script did not make stops the run. The values come from the table `SLOTS` in the script. The folders hold files made from the game's own: keep them on your PC, and never commit or upload them.
+It writes `v143-off`, `v143-moderate`, `v143-strong` and `v143-max` into `<work>/mods`. Each one is a copy of the base folder with its slot's values and its own `manifest.tsv`. Run it again after a new icon mod: each folder is built beside the old one and then takes its place. A folder of that name the script did not build for that slot stops the run, also one it only wrote into with `--into`. The values come from the table `SLOTS` in the script. The folders hold files made from the game's own: keep them on your PC, and never commit or upload them.
 
 **3. Copy them to the device:**
 
