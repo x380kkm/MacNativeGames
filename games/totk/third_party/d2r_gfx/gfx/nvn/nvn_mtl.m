@@ -8473,7 +8473,7 @@ static _Atomic int g_warm_in_play;
 /* iOS: the startup shaders came without device libraries, so every library is compiled here from its MSL (shader_load).
    Such a seed is made where there is no Metal compiler, e.g. on Windows (ios/tools/seed_windows.py: seed-manifest.json
    ios_metallibs 0, no <variant>_b.metallib). The first start then compiles what the pipeline lists name before the title
-   (warm_fill_archive; TOTK 1.4.3, lists of 2026-10-30: 20,003 libraries for 27,440 pipelines) at 80-225 ms per
+   (warm_fill_archive; TOTK 1.4.3, lists and seed of 2026-10-30: 20,005 libraries for 27,457 pipelines) at 80-225 ms per
    library with a cold Metal cache (variant_library). Set first by warm_start (warm_libraries_missing), before any
    warm-up thread runs and before any pipeline opens the pipeline archive, whose identity names it (par_identity). The compiles go to the system compiler
    service, which runs requests side by side (on the Mac 8 threads made a cold warm-up 4.6 times quicker,
