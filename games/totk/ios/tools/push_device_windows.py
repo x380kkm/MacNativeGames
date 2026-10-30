@@ -23,8 +23,8 @@ deploy backs up the saves of an installed app first, installs over it (same bund
 Documents, so the saves and the game data stay), copies the image given with --romfs when the device lacks it, and the
 shaders beside the IPA (<name>-shader-seed, package_ipa_windows.py --seed) when their fingerprint is new. Before any of that
 it stops when the app could not start afterwards, so the app installed stays as it was: a --romfs or --seed that is not what
-the app reads (--seed takes that device seed, not the folder it is made from), or no image or no shaders in the app, on the
-device or among the arguments. The saves are
+the app reads (--seed takes that device seed, not the folder it is made from), a whole romfs.bin on the device that is not the
+--romfs image, or no image or no shaders in the app, on the device or among the arguments. The saves are
 Documents/save: account.uid (16 bytes, the local account) names the folder save/save/<hi><lo> that holds them
 (runtime/account.c, fs_host.c); a backup (<dir>/<bundle id>-save-<time>/save with backup-manifest.json) keeps both, and
 a restore first backs up what the device has (beside the backup, or into --safety-to). Close the game before a restore.
@@ -113,19 +113,32 @@ def device_has_image(box):
     return ('romfs.bin' in have or 'romfs.bin.000' in have) and not copying
 
 
+def device_romfs_marker(box):
+    """The line Documents/GameData/romfs.sha256 holds, empty without one."""
+    return (box.read(f'{GAMEDATA}/romfs.sha256') or b'').decode(errors='replace').strip()
+
+
+def whole_image_on_device(box, sha, size):
+    """Whether the device holds this image as one romfs.bin. One of another image stops the run: romfs.c opens it before any
+    parts, so parts copied beside it would never be read."""
+    have = box.listdir(GAMEDATA) or {}
+    if 'romfs.bin' not in have:
+        return False
+    require(device_romfs_marker(box) == sha and have['romfs.bin'][0] == size, 'Documents/GameData holds a romfs.bin of another '
+            'image: remove it in the Files app (the runtime reads it before the parts), then run this again')
+    return True
+
+
 def push_romfs(box, image, log=print, progress=None):
     """The RomFS image into Documents/GameData in 1 GiB parts (install_device.py push_game_data). Returns what was done."""
     sha, size = romfs_sha_size(image)
     want = {f'romfs.bin.{i:03d}': min(PART, size - i * PART) for i in range((size + PART - 1) // PART)}
     box.makedirs(GAMEDATA)
-    have = box.listdir(GAMEDATA) or {}
-    marker = (box.read(f'{GAMEDATA}/romfs.sha256') or b'').decode(errors='replace').strip()
+    if whole_image_on_device(box, sha, size):
+        log('game data: the device already has this image (one file)'); return 'present'
+    have, marker = box.listdir(GAMEDATA) or {}, device_romfs_marker(box)
     complete = all(have.get(n, (None,))[0] == s for n, s in want.items())
     copying = f'copying {sha}'
-    if 'romfs.bin' in have:   # romfs.c opens a whole image before any parts
-        require(marker == sha and have['romfs.bin'][0] == size, 'Documents/GameData holds a romfs.bin of another image: '
-                'remove it in the Files app (the runtime reads it before the parts), then run this again')
-        log('game data: the device already has this image (one file)'); return 'present'
     if marker == sha and complete:
         log('game data: the device already has this image'); return 'present'
     stale = sorted(n for n in have if n.startswith('romfs.bin.') and n not in want)   # parts beyond this image's
@@ -419,7 +432,9 @@ def deploy_app(box, a, ipa, info):
         mod_files(a.mod)   # a mod the game would refuse stops here, before the long steps
     installed = box.installed()
     if a.romfs:
-        romfs_sha_size(a.romfs)   # likewise an image push_romfs would refuse
+        sha, size = romfs_sha_size(a.romfs)   # likewise an image push_romfs would refuse
+        if installed:   # a first install has no container to ask yet
+            whole_image_on_device(box, sha, size)   # and an image it would refuse on the device
     else:
         require(info['carries']['romfs'] or (installed and device_has_image(box)),
                 'no game data: none in the app and none on the device. Give --romfs <romfs.bin>')

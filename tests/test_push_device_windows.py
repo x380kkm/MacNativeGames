@@ -483,6 +483,12 @@ class Deploy(unittest.TestCase):
         (image.parent/'index.json').unlink()
         self.stops('--romfs', image, says=('index.json',))
 
+    def test_a_whole_image_of_another_kind_on_the_device_stops_the_run(self):
+        self.old_app(); self.seed_on_device()
+        (self.data/'romfs.bin').write_bytes(b'another image')
+        (self.data/'romfs.sha256').write_text('a' * 64 + '\n')
+        self.stops('--romfs', self.image(), says=('holds a romfs.bin of another image',))
+
     def test_no_seed_anywhere_stops_the_run(self):
         self.stops('--romfs', self.image(), says=('a-shader-seed', 'none on the device', '--seed'))
 
@@ -536,6 +542,13 @@ class Deploy(unittest.TestCase):
         self.old_app(); self.seed_on_device()
         (self.data/'romfs.bin').write_bytes(b'whole')
         self.finishes()
+
+    def test_a_whole_image_that_is_the_one_given_stays(self):
+        image = self.image()
+        self.old_app(); self.seed_on_device()
+        (self.data/'romfs.bin').write_bytes(bytes(10))
+        (self.data/'romfs.sha256').write_text(hashlib.sha256(bytes(10)).hexdigest() + '\n')
+        self.assertIn('the device already has this image (one file)', self.finishes('--romfs', image))
 
     def test_what_the_app_carries_needs_nothing_else(self):
         self.ipa_file = self.ipa(['GameData/shader-seed/seed-manifest.json', 'GameData/romfs/romfs.bin'])
