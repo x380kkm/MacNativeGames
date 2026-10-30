@@ -39,13 +39,13 @@ static NSString *T(NSString *z, NSString *e) { return zh() ? z : e; }
     title.adjustsFontSizeToFitWidth = YES; title.minimumScaleFactor = 0.6;
 
     _picture = [[UISegmentedControl alloc] initWithItems:@[T(@"720p（掌机）", @"720p (handheld)"), T(@"1080p（底座）", @"1080p (docked)")]];
-    _picture.selectedSegmentIndex = [d boolForKey:@"TOTK_DOCKED"] ? 1 : 0;
     _fps = [[UISegmentedControl alloc] initWithItems:@[@"30 fps", @"60 fps"]];
-    _fps.selectedSegmentIndex = [[d stringForKey:@"TOTK_PHONE_FPS"] isEqualToString:@"30"] ? 0 : 1;
+    [self showStoredRows];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(showStoredRows) name:UIApplicationDidBecomeActiveNotification object:nil];
     for (UISegmentedControl *s in @[_picture, _fps]) {
         s.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
         [s.widthAnchor constraintEqualToConstant:340].active = YES;
-        [s addTarget:self action:@selector(changed) forControlEvents:UIControlEventValueChanged];
+        [s addTarget:self action:@selector(changed:) forControlEvents:UIControlEventValueChanged];
     }
     UIStackView *pictureRow = [self row:T(@"画面", @"Picture") control:_picture];
     UIStackView *fpsRow = [self row:T(@"帧率", @"Frame rate") control:_fps];
@@ -87,6 +87,14 @@ static NSString *T(NSString *z, NSString *e) { return zh() ? z : e; }
     return self;
 }
 
+/* The two rows as the defaults hold them. The Settings app can change those while this screen is up, since iOS keeps the app
+   alive behind it, so they are read again each time the app becomes active. */
+- (void)showStoredRows {
+    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    _picture.selectedSegmentIndex = [d boolForKey:@"TOTK_DOCKED"] ? 1 : 0;
+    _fps.selectedSegmentIndex = [[d stringForKey:@"TOTK_PHONE_FPS"] isEqualToString:@"30"] ? 0 : 1;
+}
+
 /* Whether the app's Settings pane offers a setting: the start screen shows only what the Settings app has. */
 - (BOOL)settingsPaneHas:(NSString *)key {
     NSString *path = [NSBundle.mainBundle pathForResource:@"Root" ofType:@"plist" inDirectory:@"Settings.bundle"];
@@ -114,17 +122,19 @@ static NSString *T(NSString *z, NSString *e) { return zh() ? z : e; }
     return image ?: [UIImage imageNamed:@"AppIcon"] ?: [UIImage systemImageNamed:@"gamecontroller.fill"];
 }
 
-- (void)changed {
+/* A pick is saved when it is made, that row alone, and Play saves nothing: what the screen shows can be older than what is
+   stored, and writing it back would undo a change made in the Settings app. */
+- (void)changed:(UISegmentedControl *)s {
     NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
-    [d setBool:_picture.selectedSegmentIndex == 1 forKey:@"TOTK_DOCKED"];
-    [d setObject:_fps.selectedSegmentIndex == 0 ? @"30" : @"60" forKey:@"TOTK_PHONE_FPS"];
+    if (s == _picture) [d setBool:s.selectedSegmentIndex == 1 forKey:@"TOTK_DOCKED"];
+    else [d setObject:s.selectedSegmentIndex == 0 ? @"30" : @"60" forKey:@"TOTK_PHONE_FPS"];
 }
 
 - (void)start {
     if (_done) return;
     _done = YES;
     [_poll invalidate]; _poll = nil;
-    if (_firstRow < 2) [self changed];   // with no row shown nothing was picked, and the presets' rows stay as they are
+    [NSNotificationCenter.defaultCenter removeObserver:self];
     void (^go)(void) = _onStart; _onStart = nil;
     [UIView animateWithDuration:0.25 animations:^{ self.alpha = 0; } completion:^(BOOL f) { (void)f; [self removeFromSuperview]; }];
     if (go) go();
@@ -156,7 +166,7 @@ static NSString *T(NSString *z, NSString *e) { return zh() ? z : e; }
     else if ((left || right) && _row < 2) {
         UISegmentedControl *s = _row == 0 ? _picture : _fps;
         s.selectedSegmentIndex = right ? 1 : 0;
-        [self changed];
+        [self changed:s];
     } else if (confirm && _row == 2) { [self start]; return; }
     else if (confirm) _row = 2;
     [self focus];

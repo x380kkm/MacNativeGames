@@ -4,8 +4,9 @@
    app writes (TOTK_DOCKED: Full HD docked, shown only when the game's Settings pane has it; TOTK_PHONE_FPS: "30" or "60"),
    and a Start button. With the pane's custom layer on (TOTK_CUSTOM_PICTURE) those two do not apply, so only the button is
    shown and they stay as they are.
+   A pick is saved when it is made, and the rows show what the Settings app holds each time the app becomes active.
    Touch or a controller (up / down a row, left / right its value, A or the right face button to start). onStart runs
-   once, on the main thread, after the choices are saved; the view removes itself. */
+   once, on the main thread; the view removes itself. */
 @interface TOTKStartView : UIView
 - (instancetype)initWithFrame:(CGRect)frame onStart:(void (^)(void))onStart;
 @end

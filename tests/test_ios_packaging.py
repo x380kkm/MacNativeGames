@@ -219,7 +219,28 @@ class StartScreen(unittest.TestCase):
         self.assertIn('_firstRow = totk_start_first_row([d boolForKey:@"TOTK_CUSTOM_PICTURE"], [self settingsPaneHas:@"TOTK_DOCKED"]);', screen)
         self.assertIn(': _firstRow == 1 ? @[icon, title, fpsRow, _start] : @[icon, title, _start];', screen)
         self.assertIn('if (up) _row = MAX(_firstRow, _row - 1);', screen)
-        self.assertIn('if (_firstRow < 2) [self changed];', screen)
+
+    def test_a_change_in_the_settings_app_stands(self):
+        """iOS keeps the app alive behind the Settings app, so a row can change while the screen is up. A source check, the
+        screen being UIKit's: the rows are read in one method, at init and each time the app becomes active, and only a pick
+        writes one, that row alone."""
+        import re
+        screen = (TOOLS.parent/'Sources/start_screen.m').read_text(encoding='utf-8')
+        method = lambda head: re.search(re.escape(head) + r'.*?\n}', screen, re.S).group(0)
+        rows = method('- (void)showStoredRows {')
+        for read in ('[d boolForKey:@"TOTK_DOCKED"]', '[d stringForKey:@"TOTK_PHONE_FPS"]'):
+            self.assertIn(read, rows)
+            self.assertEqual(screen.count(read), 1, 'the screen has to show what it read last')
+        init = method('- (instancetype)initWithFrame:')
+        self.assertLess(init.index('_fps = [['), init.index('[self showStoredRows];'))
+        self.assertIn('addObserver:self selector:@selector(showStoredRows) name:UIApplicationDidBecomeActiveNotification', init)
+        start = method('- (void)start {')
+        self.assertNotIn('changed', start, 'Play would write back what the screen read')
+        self.assertIn('removeObserver:self', start)
+        self.assertEqual(re.findall(r'\[self changed\S*\]', screen), ['[self changed:s]'], 'only a pick saves')
+        changed = method('- (void)changed:(UISegmentedControl *)s {')
+        self.assertIn('if (s == _picture) [d setBool:', changed)
+        self.assertIn('else [d setObject:', changed)
 
 if __name__ == '__main__':
     unittest.main()
