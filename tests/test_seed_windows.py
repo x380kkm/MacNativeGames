@@ -1,6 +1,8 @@
 """games/totk/ios/tools/seed_windows.py on a synthetic seed (no game files): the seed's device form as build_ipa.py writes
 it beside an IPA, its Metal libraries, what the runtime refuses, and the git tree hash that admits SPIRV-Cross's sources."""
+import contextlib
 import hashlib
+import io
 import json
 import sys
 import tempfile
@@ -149,11 +151,18 @@ class ExtraList(unittest.TestCase):
         two = self.contribution('two', f'V\t{KEY_A}\t{PLAIN}', f'V\t{KEY_B}\t{DEPTH}')
         self.assertEqual(seed_windows.extra_rows([one, two]), {(KEY_A, PLAIN), (KEY_B, DEPTH)})
 
+    def test_rows_come_back_in_the_lists_canonical_text(self):
+        row = f'V\t{KEY_A}\t' + '{"tex": {"8": "3d"}, "img": {}, "fout": {"0": "float"}, "attr": {}}'
+        self.assertEqual(seed_windows.extra_rows([self.contribution('one', row)]), {(KEY_A, PLAIN)})
+
     def test_a_row_shader_list_py_could_not_read_stops_it(self):
         for name, row in (('short key', f'V\tabc\t{PLAIN}'), ('not json', f'V\t{KEY_A}\t{{'), ('no deps', f'V\t{KEY_A}'),
                           ('other fields', f'V\t{KEY_A}\t{{"size":{{}}}}')):
-            with self.subTest(name), self.assertRaises(seed_windows.SeedError):
-                seed_windows.extra_rows([self.contribution('bad', row)])
+            with self.subTest(name):
+                path = self.contribution('bad', f'V\t{KEY_B}\t{PLAIN}', row)   # a good row before it does not excuse it
+                with self.assertRaises(seed_windows.SeedError) as refused:
+                    seed_windows.extra_rows([path])
+                self.assertEqual(str(refused.exception), f'{path}:3: not a shader list V row')
 
     def test_a_file_without_v_rows_stops_it(self):
         with self.assertRaises(seed_windows.SeedError):
@@ -190,8 +199,11 @@ class ExtraList(unittest.TestCase):
         for name in ('totk_xlate.exe', 'spirv-cross.exe'):
             (work/'tools/bin'/name).write_bytes(b'')
         args = Namespace(work=work, romfs=self.root/'romfs', modules=None, version='v143', extra_list=list(extra))
-        with patch.object(seed_windows.subprocess, 'run', return_value=Namespace(returncode=0)) as prepare:
+        printed = io.StringIO()
+        with patch.object(seed_windows.subprocess, 'run', return_value=Namespace(returncode=0)) as prepare, \
+                contextlib.redirect_stdout(printed):
             seed_windows.cmd_seed(args)
+        self.printed = printed.getvalue()
         return [str(part) for part in prepare.call_args.args[0]]
 
     def test_without_the_option_the_shared_list_is_used_as_it_is(self):
@@ -205,6 +217,21 @@ class ExtraList(unittest.TestCase):
         cmd = self.run_seed(self.contribution('one', f'V\t{KEY_A}\t{PLAIN}'))
         self.assertEqual(cmd[cmd.index('--shader-list') + 1], str((self.root/'work/seed.list.tsv').resolve()))
         self.assertIn(f'V\t{KEY_A}\t{PLAIN}\n', (self.root/'work/seed.list.tsv').read_text())
+        self.assertIn('extra lists: the seed serves 1 of their 1 V rows\n', self.printed)
+        self.assertNotIn('not served', self.printed)
+
+    def test_the_run_says_how_many_rows_are_served_and_why_the_others_are_not(self):
+        (self.root/'work').mkdir()
+        answers = seed_windows.answers_for(json.loads(DEPTH))
+        failed = f'{KEY_A}-{seed_windows.suffix(answers)}'
+        missing = f'{KEY_C}-{seed_windows.suffix(seed_windows.answers_for(json.loads(PLAIN)))}'
+        seed = self.seed({KEY_A: [dict(tex={'8': '*'})]}, [dict(key=KEY_A, variant=failed, error='spirv-cross: no')])
+        seed.rename(self.root/'work/seed')
+        self.run_seed(self.contribution('one', f'V\t{KEY_A}\t{PLAIN}', f'V\t{KEY_A}\t{DEPTH}', f'V\t{KEY_C}\t{PLAIN}'))
+        lines = self.printed.splitlines()
+        self.assertIn('extra lists: the seed serves 1 of their 3 V rows', lines)
+        self.assertIn(f'  not served: {failed}: spirv-cross: no', lines)
+        self.assertIn(f'  not served: {missing}: this game version has no such shader', lines)
 
 
 class SpirvCrossSources(unittest.TestCase):
