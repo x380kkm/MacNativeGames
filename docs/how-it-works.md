@@ -163,6 +163,9 @@ request not mapped with its offsets and size (the first 8).
 iPad, Settings › Apps › Tears of the Kingdom › Graphics troubleshooting › Unaligned memory pool › Off sets it.
 `TOTK_VPOOL_UNALIGNED=1` turns the new behaviour on on the Mac, where the default stays as it was.
 
+None of this has run on a device, so its effect in the game is untested. `make -C games/totk probe-vpool` covers the path
+with the switch on, but it needs a Mac and has not been run on this change.
+
 ## One image at two colour slots
 
 A game can attach the same texture level or layer at two colour slots and mask off the second one. The Switch writes straight
@@ -173,9 +176,16 @@ Wild's albedo). This is true of any tile-based GPU.
 The Breath of the Wild build leaves the second slot unattached. A pipeline names every slot's format and write mask, so
 here that would give each draw of the pass a key that no row of the seed or the archive has, and the warm-up would build
 pipelines that play no longer asks for. So on iPhone and iPad both slots stay attached and only the store changes: the first slot a draw wrote through is stored, or the first slot if none was, and the
-other copy is stored as DontCare. Pipelines, the archive and the warm-up are untouched. Clears reach both copies, because
-which one is stored is known only at the end of the pass, and a draw that samples such an image stores the pass first
-instead of reading the tile. A write through the slot that is not stored is lost, as it is in the Breath of the Wild build.
+other copy is stored as DontCare. A draw writes through a slot once its primitives are in the encoder, the slot's channels
+are open and the fragment shader outputs to it (`deps.fout` in the shader's reflection), so a depth-only draw or one with no
+primitives decides nothing. Pipelines, the archive and the warm-up are untouched. A clear reaches every copy when it is
+recorded, because which one is stored is known only at the end of the pass, and of two clears through different slots the
+later one stands, as on the Switch. A draw that samples such an image stores the pass first instead of reading the tile. A
+write through the slot that is not stored is lost, as it is in the Breath of the Wild build.
+
+None of this has run on a device, so its effect in the game is untested. `tests/test_rt_dup.py` runs the store rule, the
+marks and the clears on crafted passes, and checks in the source that the draw, both store paths, the clears and the tile
+read use them.
 
 `TOTK_RT_DUP=0` turns this off; on iPhone and iPad, Settings › Apps › Tears of the Kingdom › Graphics troubleshooting › One
 image at two colour slots › Off sets it. `TOTK_RT_DUP=1` turns it on on the Mac. Apple's Mac GPUs are tile-based too, so the
@@ -198,9 +208,9 @@ zero or non-zero, and a light it scales by the count stays dark. Two kinds of re
   frame of nothing but zeros cannot be told from counters that did not count, and one report above 0 in the next frame says
   nothing about the zeros beside it. Without those frames an object whose zeros are false would flip between shown and
   hidden.
-  An iPad run (2026-10-30, 835 to 903 s) had 9 to 13 queries per submission, nearly all frames with every one at 0 and no
-  draw skipped; the log cannot say whether they were true. The 30 frames, half a second at 60 frames per second, are a
-  choice and not a measurement.
+  An iPad run of an older app without this guard (2026-10-30, 835 to 903 s) had 9 to 13 queries per submission, nearly all
+  frames with every one at 0 and no draw skipped; the log cannot say whether they were true. That run describes the
+  counters, not the guard. The 30 frames, half a second at 60 frames per second, are a choice and not a measurement.
 
 Zeros elsewhere are trusted, so a false zero there is not caught: the same run has stretches of 11 queries per frame with
 10 at 0 and no frame of nothing but zeros, and the log cannot say whether those zeros are true either.
@@ -208,7 +218,13 @@ Zeros elsewhere are trusted, so a false zero there is not caught: the same run h
 `TOTK_OCCL_GUARD=0` turns this off; on iPhone and iPad, Settings › Apps › Tears of the Kingdom › Graphics troubleshooting ›
 Occlusion guard › Off sets it. `TOTK_OCCL_GUARD=1` turns it on on the Mac, where it is off by default. A draw held back while
 its shader is prepared raises its report on every platform, whatever the switch says. The `[occl]` line in the log counts
-what was measured ("with all of them 0") and both kinds of raised report ("raised to 1", "guard raised").
+both kinds of raised report ("raised to 1", "guard raised") and the frames with at least 5 queries whose reports are all
+still 0 after the first kind of raise ("with all of them 0"). The frame rule has neither limit, so "guard raised" can grow
+while that count stays at 0.
+
+The guard has not run on a device, so its effect in the game is untested. `tests/test_occlusion_guard.py` runs the report
+rules on crafted submissions, and checks in the source that the draw path marks the draws that miss their counter and that
+the completion handler writes what the rules settle.
 
 ## The build (build_app.py)
 
