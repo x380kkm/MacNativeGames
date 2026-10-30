@@ -2085,8 +2085,10 @@ def main(argv):
                          f'none; leave the flag out to merge its code patches only')
     args.mac_game_data, game_data_folder = mac_game_data(args, device_app)
     if args.install_mod_romfs and device_app:
-        raise BuildError('an iPhone / iPad / Vision Pro build loads no player mod folder, so --install-mod-romfs has nothing to fill: '
-                         'build the Mac app (leave out --platform ios) to install a mod\'s RomFS')
+        raise BuildError('an iPhone / iPad / Vision Pro app reads its player mod folder from Documents/mods/<version> on the '
+                         'device, which a build cannot fill, so --install-mod-romfs is refused: build the Mac app (leave out '
+                         '--platform ios) to install a mod\'s RomFS, or copy a mod folder with its manifest to the device '
+                         'with games/totk/ios/tools/push_device_windows.py push-mod (docs/install.md)')
     code_mod = mod if mod and (mod / 'exefs').is_dir() else None   # a data-only mod has no code to merge
     dlcs = list(dict.fromkeys(d.expanduser().resolve() for d in args.dlc or []))
     for dlc in dlcs:
@@ -2265,7 +2267,8 @@ def main(argv):
         elif mod:
             say_mod_copy_steps(mod, tree, version, out)            # the folder is the player's: only say how to fill it
     elif mod:
-        say('4/4 app: an iPhone / iPad / Vision Pro build loads no player mod folder, so --mod merged its code patches only')
+        say(f'4/4 app: --mod merged its code patches only; the app reads RomFS mods from Documents/mods/{version} on the '
+            'device, which games/totk/ios/tools/push_device_windows.py push-mod fills (docs/install.md)')
     say(f'done in {(time.time() - t0) / 60:.0f} min: {out}')
     if args.platform=='macos':
         say('Open it from Finder. Moving it afterwards (also to /Applications) keeps the macOS check when it stays on the same '

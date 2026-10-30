@@ -174,6 +174,12 @@ class ModManifest(unittest.TestCase):
         self.assertEqual(data.decode().splitlines()[1], '\t'.join(['Sound/B.bwav', '6', hashlib.sha256(b'dubbed').hexdigest(),
                                                                    hashlib.sha256(FILES['Sound/B.bwav']).hexdigest()]))
 
+    def test_a_missing_romfs_bin_is_named_itself(self):
+        missing = self.root/'v121/romfs/romfs.bin'   # a version that was never extracted
+        result = run(self.mod, '--romfs', missing, '--check')
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(f'error: {missing} not found', result.stderr)   # not .../romfs.bin/romfs.bin
+
     def test_romfs_data_names_the_folder_of_the_image(self):
         index = self.root/'index-only'
         index.mkdir()

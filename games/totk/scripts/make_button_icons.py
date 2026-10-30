@@ -25,12 +25,15 @@ Styles:
             L R = L1 R1, ZL ZR = L2 R2, + - = Options and Create, the d-pad as a cross.
   playstation-label  the same, but A B X Y = Cross Circle Square Triangle, for TOTK_FACE_BUTTONS=label or a
             controls.txt with south = a, east = b, west = x, north = y.
---faces (xbox, playstation and playstation-label) names the four buttons drawn in the Switch A, B, X and Y icons, in that
-order, by the Xbox letters GameController names them with (A at the bottom, B on the right, X on the left, Y at the top);
-PlayStation styles draw the symbol of the same button (A Cross, B Circle, X Square, Y Triangle). The default is the
-style's own (FACES: BAYX for xbox and playstation, ABXY for playstation-label). It is for a controller that reaches the
-game with buttons already swapped, by its own profile or the system's controller settings: --style xbox --faces BAXY
-draws the Xbox letters for a controller whose X and Y arrive swapped (the button printed X plays Switch X).
+--faces (xbox, playstation and playstation-label) names the buttons that answer the Switch A, B, X and Y prompts, in that
+order, by the letters an Xbox controller prints on them (A at the bottom, B on the right, X on the left, Y at the top),
+and those are drawn in the Switch A, B, X and Y icons; PlayStation styles draw the symbol of the same button (A Cross,
+B Circle, X Square, Y Triangle). The default is the style's own (FACES: BAYX for xbox and playstation, ABXY for
+playstation-label). It is for a controller whose buttons reach the game swapped, by its own profile (an Elite
+controller's) or the system's controller settings (iPadOS Settings > General > Game Controller). Such a remap also
+changes the names GameController reports, so --faces takes the printed letters, not GameController's names:
+--style xbox --faces BAXY draws the Xbox letters for a controller whose X and Y arrive swapped (the button printed X
+answers the Switch X prompt, and GameController reports it as Y).
 The button guide in play is not drawn with this font but from eight textures of the common layout archive (A B X Y, L,
 ZL and two left-stick keys); they are redrawn from the same icons (HUD_TEXTURES). Other prompts drawn as fixed images
 (some tutorial animations) keep the Switch icons.
@@ -297,9 +300,10 @@ def stick(g, label, up=False, advance=640):
     return advance, draw
 
 
-# The face buttons by the letters GameController names them with, the Xbox labels: A at the bottom, B on the right, X on
-# the left, Y at the top. FACES: the buttons a controller style draws in the Switch A, B, X and Y icons (U+E040 to U+E043)
-# unless --faces names others.
+# The face buttons by the letters an Xbox controller prints on them: A at the bottom, B on the right, X on the left, Y at
+# the top. GameController reports the same names only while no controller profile or system setting remaps the buttons.
+# FACES: the buttons a controller style draws in the Switch A, B, X and Y icons (U+E040 to U+E043) unless --faces names
+# others.
 FACE_LETTERS = 'ABXY'
 PLAYSTATION_SYMBOLS = {'A': 'cross', 'B': 'circle', 'X': 'square', 'Y': 'triangle'}   # the same buttons on a DualSense
 FACES = {'xbox': 'BAYX', 'playstation': 'BAYX', 'playstation-label': 'ABXY'}
@@ -568,9 +572,10 @@ def main():
                         'built with --mac-game-data library: <data>/GameData/<version>; with --app that folder is the default)')
     parser.add_argument('--version', choices=VERSIONS, help='the game version (default: the mod folder name)')
     parser.add_argument('--style', choices=sorted(STYLES), default='keyboard')
-    parser.add_argument('--faces', type=parse_faces, help='the buttons drawn in the Switch A, B, X and Y icons, in that '
-                        'order, by their Xbox letters (A bottom, B right, X left, Y top), each once, for a controller whose '
-                        'buttons reach the game swapped (default: the style\'s, ' +
+    parser.add_argument('--faces', type=parse_faces, help='the buttons that answer the Switch A, B, X and Y prompts, in '
+                        'that order, by the letters an Xbox controller prints on them (A bottom, B right, X left, Y top), '
+                        'each once, drawn in those icons, for a controller whose buttons reach the game swapped by a '
+                        'profile or the system\'s settings (default: the style\'s, ' +
                         ', '.join(f'{f} for {s}' for s, f in FACES.items()) + ')')
     parser.add_argument('--replace', action='store_true', help='overwrite a font archive already in the mod folder')
     args = parser.parse_args()

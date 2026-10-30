@@ -287,7 +287,7 @@ The saves are in the app's `Documents/save`: `account.uid` (16 bytes, the local 
 
 The game's prompts show the Switch's buttons. A controller other than Nintendo's is mapped by position: its right button plays Switch A, the bottom one B, the top one X and the left one Y. So on an Xbox controller the letter in a prompt is not the letter printed on the button to press. A RomFS mod can draw the controller's buttons in the prompts instead. It changes the pictures only: which button does what stays as it is.
 
-The app reads such a mod from its `Documents/mods/v143` (`ios/Sources/main.m`; `v143` is the folder of 1.4.3). An app whose runtime was built from a commit without this (one where `push_device_windows.py` has no `push-mod` command) ignores the folder: build the runtime again (step 4) and package (step 5). With the debug log on, an app that reads the folder writes `[totk] player mods: <folder>` at start, or `[totk] player mods: none (…)`.
+The app reads such a mod from its `Documents/mods/v143` (`ios/Sources/main.m`; `v143` is the folder of 1.4.3). An app whose runtime was built from a commit without this (one where `push_device_windows.py` has no `push-mod` command) ignores the folder: build the runtime again and package it, steps 4 and 5 of [Without the card image and keys](#without-the-card-image-and-keys-from-an-earlier-ipa-on-windows). With the debug log on, an app that reads the folder writes `[totk] player mods: <folder>` at start, or `[totk] player mods: none (…)`.
 
 **1. A Python with fontTools,** once. `uv` installs it from its cache without a download when the cache has fontTools (`--offline`; leave that out to download it):
 
@@ -296,7 +296,7 @@ uv venv --python 3.14 <work>/tools/icons-venv
 uv pip install --offline --python <work>/tools/icons-venv/Scripts/python.exe fonttools
 ```
 
-**2. Make the mod** from the RomFS of step 1, into a folder outside the repository:
+**2. Make the mod** from the RomFS that `recover_ipa.py` recovered (`<work>/totk/extracted/v143/romfs`, step 1 of [Without the card image and keys](#without-the-card-image-and-keys-from-an-earlier-ipa-on-windows)), into a folder outside the repository:
 
 ```powershell
 <work>/tools/icons-venv/Scripts/python.exe games/totk/scripts/make_button_icons.py <work>/mods/v143-xbox --romfs <work>/totk/extracted/v143/romfs --style xbox
@@ -371,7 +371,7 @@ Tears of the Kingdom; for Breath of the Wild replace `TOTK` with `BotW` and `tot
 - Game data (only for an app built with `--mac-game-data library` or `--mac-game-data-folder`): `~/Library/Application Support/MacNativeGames/TOTK/GameData/<version>` (`BotW` for Breath of the Wild) holds the 16 GB RomFS image `romfs.bin`, and `romfs.sha256`, which the build writes once the copy is complete. By default the image is inside the app. With `--mac-game-data library` the build puts it in this folder once (an APFS clone when the work folder is on the same volume, otherwise a copy), and later builds leave it alone while it matches the version's pin. The app is then a few hundred MB, so a new build installs or copies to another Mac quickly. To keep it somewhere else, for example on another disk, add `--mac-game-data-folder <folder>` to the build instead (that alone is enough; the image goes in `<folder>/<version>`, so one folder can hold both games). The app remembers the folder, and when it holds no complete image (another Mac, or the disk is not connected) the launcher looks in `GameData` instead. When neither has it, the app asks where the game data is: connect the disk and choose Try Again, or choose the folder that holds `romfs.bin` (or its `<version>` folder). It reads the image where it is, without moving or copying it, and remembers the folder for the next starts (`defaults delete org.macnativegames.botw MNGGameDataFolder.botw190` forgets it). The game still checks the image against the pin at its first start. `make_mod_manifest.py --app` and `make_button_icons.py --app` find the image the same way (`--romfs-data <folder>` names it).
 - Shader cache: `~/Library/Application Support/MacNativeGames/TOTK/shader-cache`
 - Shaders the shared list lacks: `~/Library/Application Support/MacNativeGames/TOTK/shader-list-contribution.txt` (the game asks before it starts whether to send them; see the [shared shader list](shader-list.md))
-- Mods: `~/Library/Application Support/MacNativeGames/TOTK/mods/<v0|v112|v121|v143>`; see [mods.md](mods.md)
+- Mods: `~/Library/Application Support/MacNativeGames/TOTK/mods/<v0|v112|v121|v143>`; see [mods.md](mods.md). On an iPhone or iPad: the app's `Documents/mods/<version>` (`v143` for 1.4.3); see [Controller button icons, on Windows](#controller-button-icons-on-windows)
 - Log: off by default. `defaults write org.macnativegames.totk TOTK_DEBUG_LOG -bool YES` turns it on from the next start, written to `~/Library/Logs/MacNativeGames/totk.log`. On an iPhone: Settings › TOTK › Debug log, written to the app's `Documents/log.txt`.
 
 ## Known issues

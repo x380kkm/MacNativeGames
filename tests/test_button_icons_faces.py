@@ -40,10 +40,14 @@ class Faces(unittest.TestCase):
             out.append(''.join(g.cut))
         return ''.join(out)
 
+    def drawn(self, style, faces, cp):
+        """What the icon at cp shows: its outline and the text it cuts out (Letters records the text instead of drawing it)."""
+        pen, g = self.pen(), Letters()
+        self.icons.style_icons(style, g, faces)[cp][1](pen)
+        return pen.value, g.cut
+
     def outline(self, style, faces, cp):
-        pen = self.pen()
-        self.icons.style_icons(style, Letters(), faces)[cp][1](pen)
-        return pen.value
+        return self.drawn(style, faces, cp)[0]
 
     def test_parsing(self):
         self.assertEqual(self.icons.parse_faces('BAXY'), 'BAXY')
@@ -70,8 +74,11 @@ class Faces(unittest.TestCase):
     def test_faces_change_only_the_face_icons(self):
         plain, swapped = self.icons.style_icons('xbox', Letters()), self.icons.style_icons('xbox', Letters(), 'BAXY')
         self.assertEqual(set(plain), set(swapped))
-        for cp in set(plain) - set(SLOTS):
-            self.assertEqual(self.outline('xbox', None, cp), self.outline('xbox', 'BAXY', cp), f'U+{cp:04X}')
+        others = sorted(set(plain) - set(SLOTS))
+        for cp in others:
+            self.assertEqual(self.drawn('xbox', None, cp), self.drawn('xbox', 'BAXY', cp), f'U+{cp:04X}')
+        labels = {text for cp in others for text in self.drawn('xbox', None, cp)[1]}
+        self.assertTrue({'LB', 'RB', 'LT', 'RT'} <= labels, labels)   # the comparison sees the labels, not only the shapes
 
     def test_playstation_defaults_stay(self):
         # by position Circle Cross Triangle Square, by label Cross Circle Square Triangle (as before --faces)
@@ -79,7 +86,7 @@ class Faces(unittest.TestCase):
         self.assertEqual(self.icons.FACES['playstation-label'], 'ABXY')
         for style, faces in self.icons.FACES.items():
             for cp in SLOTS:
-                self.assertEqual(self.outline(style, None, cp), self.outline(style, faces, cp), (style, cp))
+                self.assertEqual(self.drawn(style, None, cp), self.drawn(style, faces, cp), (style, cp))
         symbols = [self.icons.PLAYSTATION_SYMBOLS[letter] for letter in self.icons.FACES['playstation']]
         self.assertEqual(symbols, ['circle', 'cross', 'triangle', 'square'])
 

@@ -51,8 +51,9 @@ def image_file(romfs):
 
 
 def romfs_folder(path):
-    """The RomFS folder --romfs names: the folder itself, or the folder of the romfs.bin it names."""
-    return path.parent if path.name == 'romfs.bin' and path.is_file() else path
+    """The RomFS folder --romfs names: the folder itself, or the folder of the romfs.bin it names. A romfs.bin that is
+    missing still counts as the image, so the caller's check names that file."""
+    return path.parent if path.name == 'romfs.bin' and not path.is_dir() else path
 
 
 def app_image_dir(app, version):

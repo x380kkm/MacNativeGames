@@ -187,9 +187,12 @@ manifest. The build warns when it starts and again right before the copy:
 Without the flag the build leaves the folder untouched and prints the two commands that perform the copy and the
 manifest by hand.
 
-Nothing changes at run time: the game loads this folder and its manifest as before. The iPhone / iPad build has
-no player mod folder yet, so there `--mod` merges the code patches only (and `--install-mod-romfs` is refused
-there: there is no folder to fill).
+Nothing changes at run time: the game loads this folder and its manifest as before. An iPhone / iPad / Vision Pro
+app loads its player mod folder from its own `Documents/mods/<version>` when that folder holds a `manifest.tsv`
+(`games/totk/ios/Sources/main.m`; an app whose runtime was built before commit bd81859 loads none). That folder is in
+the app's container on the device, which a build cannot fill, so there `--mod` merges the code patches only and
+`--install-mod-romfs` is refused. `games/totk/ios/tools/push_device_windows.py push-mod` copies a mod folder and its
+manifest there ([install.md](install.md#controller-button-icons-on-windows)).
 
 What the build does, in order:
 
@@ -351,7 +354,9 @@ Check `grep "mods/botw160 checked" ~/Library/Logs/MacNativeGames/botw.log | tail
 - A mod with a code patch also needs its `exefs/` patch to match the game version the app is built from.
   The build checks what the file itself says: a `.pchtxt` is refused when its `@nsobid-` names another
   main, and an `.ips` / `.ips32` named after a build id is left out when that id is not this main's.
-- This guide covers the Mac app; installing mods into the iPhone/iPad app container is not covered.
+- This guide covers the Mac app. An iPhone/iPad app loads a mod from its `Documents/mods/<version>`;
+  [install.md](install.md#controller-button-icons-on-windows) shows how `push_device_windows.py push-mod` copies a mod
+  folder there.
 
 ### When the start stops
 
@@ -565,8 +570,11 @@ App 自己会替换的文件），它其实什么都没替换——这时构建�
 
 不带这个参数时，构建完全不碰这个目录，只打印手动执行的两条命令。
 
-运行时没有任何变化，游戏仍然在启动时加载这个目录和清单；构建只负责复制和写清单。iPhone / iPad 构建
-目前没有玩家 mod 目录，所以那里 `--mod` 只合并代码补丁（`--install-mod-romfs` 会被直接拒绝：没有可填的目录）。
+运行时没有任何变化，游戏仍然在启动时加载这个目录和清单；构建只负责复制和写清单。iPhone / iPad / Vision Pro 的
+App 从自己的 `Documents/mods/<版本>` 加载玩家 mod 目录，前提是里面有 `manifest.tsv`（`games/totk/ios/Sources/main.m`；
+运行时在提交 bd81859 之前构建的 App 不加载）。这个目录在设备上 App 的容器里，构建填不了，
+所以那里 `--mod` 只合并代码补丁，`--install-mod-romfs` 会被拒绝。
+`games/totk/ios/tools/push_device_windows.py push-mod` 把 mod 文件夹连同清单复制过去（见 [install.zh-CN.md](install.zh-CN.md#手柄按键图标windows)）。
 
 构建做的事，按顺序：
 
@@ -696,7 +704,8 @@ python3 games/totk/scripts/make_mod_manifest.py "$MODDIR" --app "/path/to/Breath
   时构建会拒绝，并同时报出这两个文件。
 - 带代码补丁的 mod，其 `exefs/` 补丁也要和构建所用的游戏版本一致。构建按文件自己写的东西核对：`.pchtxt` 的
   `@nsobid-` 不是这个 main 就拒绝；按 build id 命名的 `.ips` / `.ips32`，id 不是这个 main 就留出并提示。
-- 本文面向 Mac App；iPhone/iPad 的 App 容器内安装未在此说明。
+- 本文面向 Mac App。iPhone/iPad 的 App 从自己的 `Documents/mods/<版本>` 加载 mod；用 `push_device_windows.py push-mod`
+  把 mod 文件夹复制过去的方法见 [install.zh-CN.md](install.zh-CN.md#手柄按键图标windows)。
 
 ### 启动停止时
 

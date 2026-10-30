@@ -286,7 +286,7 @@ python games/totk/ios/tools/push_device_windows.py deploy <目录>/TOTK.ipa --ro
 
 游戏的按键提示画的是 Switch 的按键。任天堂以外的手柄按位置映射：右边的键是 Switch 的 A，下边是 B，上边是 X，左边是 Y。所以用 Xbox 手柄时，提示里的字母和要按的那个键上印的字母不一样。RomFS mod 可以在提示里改画手柄自己的按键。它只改图，哪个键做什么不变。
 
-App 从自己的 `Documents/mods/v143` 读取这样的 mod（`ios/Sources/main.m`；`v143` 是 1.4.3 的文件夹）。运行时所在的提交里还没有这项改动（`push_device_windows.py` 没有 `push-mod` 命令）的 App 不读这个文件夹：重新构建运行时（第 4 步）再打包（第 5 步）。打开日志时，读这个文件夹的 App 启动时会写 `[totk] player mods: <文件夹>`，或 `[totk] player mods: none (…)`。
+App 从自己的 `Documents/mods/v143` 读取这样的 mod（`ios/Sources/main.m`；`v143` 是 1.4.3 的文件夹）。运行时所在的提交里还没有这项改动（`push_device_windows.py` 没有 `push-mod` 命令）的 App 不读这个文件夹：按[没有卡带镜像和密钥](#没有卡带镜像和密钥在-windows-上用旧-ipa-重新打包)的第 4 步重新构建运行时，再按其第 5 步打包。打开日志时，读这个文件夹的 App 启动时会写 `[totk] player mods: <文件夹>`，或 `[totk] player mods: none (…)`。
 
 **1. 带 fontTools 的 Python**，只做一次。uv 的缓存里有 fontTools 时，`uv` 从缓存安装，不用下载（`--offline`；去掉它就联网下载）：
 
@@ -295,7 +295,7 @@ uv venv --python 3.14 <工作目录>/tools/icons-venv
 uv pip install --offline --python <工作目录>/tools/icons-venv/Scripts/python.exe fonttools
 ```
 
-**2. 做 mod**，用第 1 步还原的 RomFS，放到仓库以外的文件夹：
+**2. 做 mod**，用 `recover_ipa.py` 还原的 RomFS（`<工作目录>/totk/extracted/v143/romfs`，[没有卡带镜像和密钥](#没有卡带镜像和密钥在-windows-上用旧-ipa-重新打包)的第 1 步），放到仓库以外的文件夹：
 
 ```powershell
 <工作目录>/tools/icons-venv/Scripts/python.exe games/totk/scripts/make_button_icons.py <工作目录>/mods/v143-xbox --romfs <工作目录>/totk/extracted/v143/romfs --style xbox
@@ -389,7 +389,7 @@ python3.14 games/totk/ios/tools/install_device.py "<文件夹>/TOTK-Vision.app" 
 - 存档：`~/Library/Application Support/MacNativeGames/TOTK/profile`
 - 着色器缓存：`~/Library/Application Support/MacNativeGames/TOTK/shader-cache`
 - 公共清单里还没有的着色器：`~/Library/Application Support/MacNativeGames/TOTK/shader-list-contribution.txt`。游戏启动前会问要不要发送，见[公共着色器清单](shader-list.md)。
-- 模组：`~/Library/Application Support/MacNativeGames/TOTK/mods/<v0|v112|v121|v143>`，见 [mods.md](mods.md)。
+- 模组：`~/Library/Application Support/MacNativeGames/TOTK/mods/<v0|v112|v121|v143>`，见 [mods.md](mods.md)。iPhone 或 iPad 上是 App 的 `Documents/mods/<版本>`（1.4.3 是 `v143`），见[手柄按键图标（Windows）](#手柄按键图标windows)。
 - 日志：默认关闭。
   - Mac：`defaults write org.macnativegames.totk TOTK_DEBUG_LOG -bool YES`，下次启动起写到 `~/Library/Logs/MacNativeGames/totk.log`。
   - iPhone：在“设置 › TOTK › 記錄日誌”打开，写到 App 的 `Documents/log.txt`。
