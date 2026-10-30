@@ -109,11 +109,14 @@ int totk_texture_env_build(const char *mode, totk_texture_env *out) {
 const char *totk_large_textures_default(void) { return "auto"; }
 
 /* "full" needs room for the top levels. Measured on an iPad Pro M4 with them left out (2026-10-30, 912 s of play, no
-   eviction): peak footprint 4,980 MiB, and the texture copies, the only thing "full" enlarges, at most 347 MiB. A copy
-   without its top level is a quarter of the whole texture, so "full" adds at most 3 x 347 = 1,041 MiB. With the 250 MiB
-   the eviction wants free (TOTK_TEX_EVICT_LOW_MB) that makes 6,271 MiB; the app's allowance at launch has to cover that.
+   eviction): footprint peaked at 4,980 MiB (247 samples) and the texture copies, the only thing "full" enlarges, at
+   421 MiB (65 samples). A copy without its top level is about a quarter of the whole texture and a copy with every level
+   does not grow, so "full" adds up to about 3 x 421 = 1,263 MiB. With the 250 MiB the eviction wants free
+   (TOTK_TEX_EVICT_LOW_MB) that makes 6,493 MiB; the app's allowance at launch has to cover that. The two peaks fell in
+   different samples and no one sample comes to more than 4,847 + 3 x 408 = 6,071 MiB, but samples this far apart cannot
+   show that the peaks never meet, so they are added.
    The allowance is what the system actually grants, entitlement included; the installed memory does not say it. */
-#define FULL_NEEDS_MIB 6400ull
+#define FULL_NEEDS_MIB 6500ull
 const char *totk_large_textures_auto(uint64_t available_bytes) {
 #ifdef GAME_BOTW
     (void)available_bytes;

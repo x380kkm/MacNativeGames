@@ -183,9 +183,9 @@ int main(int argc, char **argv) {
     textures("save", NULL, NULL);
     textures("more", "2", NULL);
     textures("full", NULL, "0");
-    /* "auto" is "full" from the 6,400 MiB the measured peak needs, "save" below it and when the allowance is unknown. */
-    if (strcmp(totk_large_textures_auto(0), "save") || strcmp(totk_large_textures_auto((6400ull << 20) - 1), "save") ||
-        strcmp(totk_large_textures_auto(6400ull << 20), "full") || strcmp(totk_large_textures_auto(12000ull << 20), "full")) {
+    /* "auto" is "full" from the 6,500 MiB the measured peak needs, "save" below it and when the allowance is unknown. */
+    if (strcmp(totk_large_textures_auto(0), "save") || strcmp(totk_large_textures_auto((6500ull << 20) - 1), "save") ||
+        strcmp(totk_large_textures_auto(6500ull << 20), "full") || strcmp(totk_large_textures_auto(12000ull << 20), "full")) {
         failures++; fprintf(stderr, "large textures auto picks the wrong mode\n");
     }
     totk_texture_env te = {"keep", "keep"};
