@@ -231,7 +231,7 @@ python games/totk/ios/tools/seed_windows.py tools --work <种子工作目录>
 python games/totk/ios/tools/seed_windows.py seed --work <种子工作目录> --romfs <工作目录>/totk/extracted/v143/romfs --modules <工作目录>/totk/rewritten/v143 --version v143
 ```
 
-`tools` 构建 `build_app.py` 固定提交的 SPIRV-Cross（源码先和 GitHub 给出的该提交的源码树核对）和 win-x64 版着色器翻译器，放在 `<种子工作目录>/tools/bin`。`seed` 写出 `<种子工作目录>/seed`：1.4.3 约 3.1 万个变体，第一次约 11 分钟，之后会复用已有的翻译。`--extra-list <shader-list-contribution.txt>`（可重复）把设备写下的文件里的 `V` 行只加进这个种子。已有变体能服务的行不会新增变体，运行结束时会打印种子服务了多少行，以及其余各行没有服务到的原因。
+`tools` 构建 `build_app.py` 固定提交的 SPIRV-Cross（源码先和 GitHub 给出的该提交的源码树核对）和 win-x64 版着色器翻译器，放在 `<种子工作目录>/tools/bin`。`seed` 写出 `<种子工作目录>/seed`：1.4.3 约 3.1 万个变体，第一次约 11 分钟，之后会复用已有的翻译。`--extra-list <shader-list-contribution.txt>`（可重复）把设备写下的文件里的 `V` 行只加进这个种子。已有变体能服务的行不会新增变体，运行结束时会打印种子服务了多少行和这些行新增了多少变体，以及其余各行没有服务到的原因。
 
 **4. 在 GitHub Actions 上构建运行时。** 工作流 `.github/workflows/ios-runtime.yml` 在 `macos-26` 机器上只用本仓库构建 App 的可执行文件（`build_ipa.py --runtime-only --embed-layout games/totk/ios/ci/embed-layout-v143.json`），游戏的九个代码节留成全零。可执行文件带着布局里的代码节哈希，所以在布局于 2026-10-30 改动之前构建的运行时不接受第 2 步的代码节，第 5 步会以“another embed layout”停下（用 `--check-only` 核对 2026-10-26 的运行时就是这样）。在你的 fork 的 Actions 页启用 Actions。推送到分支 `ios-windows-fixes` 的改动涉及 `games/totk/**` 或工作流文件时，工作流就会运行。工作流文件进了 fork 的默认分支后，也可以用“Run workflow”手动运行。下载这次运行的产物 `totk-ios-runtime`（保留 14 天）并解压一次，里面是 `TOTK-runtime.zip`。这个 zip 里有 `TOTK.app` 和 `TOTK-runtime.commit`，后者写着这次运行构建的提交，下一步从这里读取。这样不会有任何游戏内容传到 GitHub，也绝不能传：工作目录、种子、IPA 以及用它们编出的 Metal 库都不要提交，也不要上传。
 

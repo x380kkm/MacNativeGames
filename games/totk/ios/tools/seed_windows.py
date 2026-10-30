@@ -18,9 +18,9 @@ seed: scripts/prepare_shader_seed.py with them, into <work>/seed, its caches bes
   (shader-list-contribution.txt: the bind states it met that the shared list lacks) to this seed only: they join a copy
   of the shared list, <work>/seed.list.tsv, and the warm-up lists stay the shared list's. A row a variant made before
   already serves adds no variant (prepare_shader_seed.py plan). The run then prints how many rows the seed serves, with
-  the rule the runtime picks a variant by (totk_shader_rt.m deps_match over <key>.variants), and why the others are not
-  served: a failed translation, or a shader this game version does not have. Without --extra-list the shared list is
-  used as it is.
+  the rule the runtime picks a variant by (totk_shader_rt.m deps_match over <key>.variants), how many variants the rows
+  added, and why the rows not served are not: a failed translation, or a shader this game version does not have. Without
+  --extra-list the shared list is used as it is.
 
 The device form (device_seed; package_ipa_windows.py --seed makes it beside the IPA with the runtime's translation chain,
 push_device_windows.py copies it into the app's Documents/GameData) is what build_ipa.py puts beside an IPA built with
@@ -39,8 +39,8 @@ TOTK = TOOLS.parents[1]
 REPO = TOTK.parents[1]
 XLATE = TOTK / 'tools/totk_xlate'
 sys.path.insert(0, str(TOTK/'scripts'))
-from prepare_shader_seed import answers_for, deps_match, suffix   # noqa: E402
-from shader_list import KEY, canonical   # noqa: E402
+from prepare_shader_seed import answers_for, builtin_variants, deps_match, suffix   # noqa: E402
+from shader_list import KEY, ShaderList, canonical   # noqa: E402
 
 # What the device imports (totk_shader_seed.h totk_seed_import_into): file names, schema 1, a shader count
 SEED_NAME = re.compile(r'^(?:[0-9a-f]{64}\.variants|[0-9a-f]{64}-[0-9a-f]{12}_b\.(?:metal|json|metallib)|pso_manifest\.tsv|shader-keys\.json)$')
@@ -286,6 +286,12 @@ def list_with_rows(rows, path):
     return path
 
 
+def seed_variants(seed, key):
+    """The rows of a shader's .variants, none when the seed has no variant of it."""
+    index = seed/f'{key}.variants'
+    return json.loads(index.read_bytes()) if index.is_file() else []
+
+
 def unserved(seed, rows):
     """variant -> why, for the rows no variant of the seed serves. A row is served when a row of its shader's .variants
     matches its bind state, the test the runtime picks a variant with, so a served row is a draw the device does not skip."""
@@ -294,13 +300,28 @@ def unserved(seed, rows):
     why = {}
     for key, deps in sorted(rows):
         answers = answers_for(json.loads(deps))
-        index = seed/f'{key}.variants'
-        variants = json.loads(index.read_bytes()) if index.is_file() else []
-        if not any(deps_match(v.get('deps', {}), answers) for v in variants):
+        if not any(deps_match(v.get('deps', {}), answers) for v in seed_variants(seed, key)):
             variant = f'{key}-{suffix(answers)}'
             why[variant] = 'this game version has no such shader' if key not in game else \
                 failed.get(variant, 'seed-manifest.json records no failure for it')
     return why
+
+
+def added_variants(seed, rows):
+    """The variants of the seed only these rows asked for: a row's own translation, under the name prepare_shader_seed.py
+    plan gives it, kept in its shader's .variants. A row a variant made before serves has none, since the preparation
+    keeps no translation of it. A name the seed would hold without the rows is left out: a built-in variant's (the default
+    bind state, the shadow maps' depth textures) or a shared-list row's, which a device's row can repeat."""
+    def own(key, deps):
+        return f'{key}-{suffix(answers_for(json.loads(deps)))}'
+    shared = {own(key, deps) for key, deps in ShaderList.load(SHADER_LIST).variants}
+    added = set()
+    for key, deps in rows:
+        variant = own(key, deps)
+        kept = {v['variant'] for v in seed_variants(seed, key)} - {v['variant'] for v in builtin_variants(seed, key)}
+        if variant in kept - shared:
+            added.add(variant)
+    return added
 
 
 def cmd_seed(a):
@@ -322,6 +343,8 @@ def cmd_seed(a):
     if extra:
         missing = unserved(work/'seed', extra)
         print(f'extra lists: the seed serves {len(extra) - len(missing)} of their {len(extra)} V rows')
+        added = added_variants(work/'seed', extra)
+        print(f'extra lists: their rows added {len(added)} variants to the seed (a row a variant already serves adds none)')
         for variant, why in missing.items():
             print(f'  not served: {variant}: {why}')
     print(f'seed ready in {work/"seed"}: package_ipa_windows.py --seed {work/"seed"} makes its device form')

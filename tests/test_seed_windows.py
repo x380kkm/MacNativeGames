@@ -119,6 +119,7 @@ class DeviceSeed(unittest.TestCase):
 KEY_A, KEY_B, KEY_C = 'a' * 64, 'b' * 64, 'c' * 64
 PLAIN = '{"attr":{},"fout":{"0":"float"},"img":{},"tex":{"8":"3d"}}'
 DEPTH = '{"attr":{},"fout":{},"img":{},"tex":{"8":"2darray_depth"}}'
+ADDED = 'extra lists: their rows added {} variants to the seed (a row a variant already serves adds none)'
 
 
 class ExtraList(unittest.TestCase):
@@ -232,6 +233,53 @@ class ExtraList(unittest.TestCase):
         self.assertIn('extra lists: the seed serves 1 of their 3 V rows', lines)
         self.assertIn(f'  not served: {failed}: spirv-cross: no', lines)
         self.assertIn(f'  not served: {missing}: this game version has no such shader', lines)
+
+    def own(self, key, deps):
+        return f'{key}-{seed_windows.suffix(seed_windows.answers_for(json.loads(deps)))}'
+
+    def seed_of_own_variants(self, key, *rows):
+        """A seed whose variants of this shader carry the names the preparation gives these rows."""
+        seed = self.seed({})
+        (seed/f'{key}.variants').write_text(json.dumps([dict(variant=self.own(key, d), deps=json.loads(d)) for d in rows]))
+        return seed
+
+    def test_rows_other_variants_serve_add_no_variant(self):
+        (self.root/'work').mkdir()
+        seed = self.seed({KEY_A: [dict(tex={'8': '*'}), dict(tex={'8': '*_depth'})]})
+        seed.rename(self.root/'work/seed')
+        self.run_seed(self.contribution('one', f'V\t{KEY_A}\t{PLAIN}', f'V\t{KEY_A}\t{DEPTH}'))
+        lines = self.printed.splitlines()
+        self.assertIn('extra lists: the seed serves 2 of their 2 V rows', lines)
+        self.assertIn(ADDED.format(0), lines)
+
+    def test_a_variant_kept_for_a_row_is_counted(self):
+        (self.root/'work').mkdir()
+        seed = self.seed_of_own_variants(KEY_A, PLAIN)
+        seed.rename(self.root/'work/seed')
+        self.run_seed(self.contribution('one', f'V\t{KEY_A}\t{PLAIN}', f'V\t{KEY_A}\t{DEPTH}'))
+        lines = self.printed.splitlines()
+        self.assertIn('extra lists: the seed serves 1 of their 2 V rows', lines)
+        self.assertIn(ADDED.format(1), lines)
+
+    def test_two_rows_with_one_translation_added_one_variant(self):
+        star, plain = '{"tex":{"8":"*"}}', '{"tex":{"8":"2d"}}'
+        seed = self.seed_of_own_variants(KEY_A, star)
+        self.assertEqual(seed_windows.added_variants(seed, {(KEY_A, star), (KEY_A, plain)}), {self.own(KEY_A, star)})
+
+    def test_the_default_variant_is_not_added_by_a_row(self):
+        row = '{"attr":{},"fout":{},"img":{},"tex":{}}'
+        self.assertEqual(self.own(KEY_A, row), A)
+        self.assertEqual(seed_windows.added_variants(self.seed_of_own_variants(KEY_A, row), {(KEY_A, row)}), set())
+
+    def test_the_shadow_map_variant_is_not_added_by_a_row(self):
+        default, depth = '{"attr":{},"fout":{},"img":{},"tex":{}}', '{"attr":{},"fout":{},"img":{},"tex":{"8":"*_depth"}}'
+        seed = self.seed_of_own_variants(KEY_A, default, depth)
+        (seed/f'{A}_b.json').write_text(json.dumps(dict(compare_slots=[8])))   # the translation that adds this job
+        self.assertEqual(seed_windows.added_variants(seed, {(KEY_A, depth)}), set())
+
+    def test_a_row_the_shared_list_has_too_added_nothing(self):
+        seed = self.seed_of_own_variants(KEY_C, PLAIN)
+        self.assertEqual(seed_windows.added_variants(seed, {(KEY_C, PLAIN)}), set())
 
 
 class SpirvCrossSources(unittest.TestCase):
