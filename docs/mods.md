@@ -308,9 +308,8 @@ on the device.
 | Option | What it edits | Limits |
 | --- | --- | --- |
 | `--durability K` | `MaxLife` times K in `Life/LifeParameters/Weapon_{Sword,Lsword,Spear,Shield,Bow}_*` of every pack that carries one (206 packs in 1.4.3) and in the rows of those 206 actors in `RSDB/GameActorInfo`; whole numbers from 1 to 100000 | Only items obtained after the mod is in: a save keeps each item's durability. A community report on 1.1.x says the Master Sword goes back to its normal value after it recharges. |
-| `--battery-drain D` | every entry of `ZonauEnergy_CostRate` divided by D, in `Pack/Actor/Player.pack.zs`, member `Component/ConditionParam/Player.game__component__ConditionParam.bgyml` (index 0 is very likely the rate without Zonaite armor, the others its levels) | The number of battery cells is saved (`PlayerStatus.MaxEnergy`) and stays. Drain reaches the battery as a whole number, so a very small rate may not scale evenly. |
-| `--battery-recharge R` | every entry of `ZonauEnergy_HealRate` times R, in the same member (index 1 is very likely the Zonaite armor set bonus) | That this value scales the recharge is likely, not traced in the code. The pause before the battery recharges is a constant in the code and stays. |
-| `--wear W` (experimental) | `ExternalDamageParameters.DamageRates.Durability` set to W in `Life/DamageParameters/EquipmentCommon` and `ShieldCommon` (206 packs) | It would also reach items already owned. The code that applies wear uses whole numbers, so what a value below 1 does is unknown. The four slots below leave it unchanged. |
+| `--battery-drain D` | every entry of `ZonauEnergy_CostRate` divided by D, in `Pack/Actor/Player.pack.zs`, member `Component/ConditionParam/Player.game__component__ConditionParam.bgyml` (index 0 is very likely the rate without Zonaite armor, the others its levels) | The number of battery cells is saved (`PlayerStatus.MaxEnergy`) and stays. The game's code rounds a device's drain to whole units per second. The slowest device found uses 15, so at D = 5 the three Zonaite armor levels all drain 2 per second with it, and a D above 15 could round its drain to nothing at the last level. |
+| `--battery-recharge R` | every entry of `ZonauEnergy_HealRate` times R, in the same member (index 1 is very likely the Zonaite armor set bonus) | The game's code does `energy += MaxEnergy / 3000 * (rate * 150) * dt`, so with the original rate of 1 an empty battery refills in 20 seconds, taking `dt` as seconds, and in 20 / R seconds with this option. The pause before the battery recharges is a constant in the code and stays. |
 
 ```bash
 python3.14 games/totk/scripts/make_gameplay_tuning.py --romfs <folder of romfs.bin> --into <mod folder> \
@@ -331,6 +330,14 @@ python3.14 games/totk/scripts/make_gameplay_tuning.py --romfs <folder of romfs.b
 `--slots <folder> --base <mod folder>` builds the folders `<version>-off`, `-moderate`, `-strong` and `-max` from a copy of
 the base folder. An iPhone or iPad chooses between them in its Settings app; see
 [install.md](install.md#durability-and-battery-presets-on-windows). The Mac launcher does not read these folders.
+
+No option changes the wear per hit, so items you already own wear as before. `DamageRates.Durability` in
+`Life/DamageParameters/EquipmentCommon` and `ShieldCommon` looks like the place, but 1.4.3's code reads that rate only for
+an incoming attack of the type `Durability`, and none was found. A melee hit costs a literal 1, and rods, throws and AI
+requests add whole steps of 1 that no rate scales; a bow very likely does the same, though its trigger was not isolated. A
+blocked hit costs at least 1 through a separate rate. So `--durability K` does not compound with anything: a new weapon
+takes K times as many hits, and a new shield lasts K times as long at the same wear per block. This comes from reading
+the code, not from a run on a device.
 
 None of these values has been seen working in the game on 1.4.3 yet.
 
@@ -709,9 +716,8 @@ mod 的 `exefs/` 里可能还有这些文件，构建这样处理：
 | 选项 | 改什么 | 限制 |
 | --- | --- | --- |
 | `--durability K` | 把 `MaxLife` 乘以 K：带有 `Life/LifeParameters/Weapon_{Sword,Lsword,Spear,Shield,Bow}_*` 的每个包（1.4.3 有 206 个），以及这 206 个 actor 在 `RSDB/GameActorInfo` 里的行；结果是 1 到 100000 的整数 | 只影响 mod 生效后才拿到的物品：存档保留每件物品的耐久。社区在 1.1.x 上的报告说，大师之剑充能后会回到普通数值。 |
-| `--battery-drain D` | 把 `ZonauEnergy_CostRate` 的每一项除以 D，位于 `Pack/Actor/Player.pack.zs` 的成员 `Component/ConditionParam/Player.game__component__ConditionParam.bgyml`（下标 0 很可能是不穿 Zonaite 防具时的倍率，其余是防具的等级） | 电池格数保存在存档里（`PlayerStatus.MaxEnergy`），不变。耗电以整数传给电池，所以很小的倍率可能不按比例生效。 |
-| `--battery-recharge R` | 把 `ZonauEnergy_HealRate` 的每一项乘以 R，位于同一成员（下标 1 很可能是 Zonaite 防具的套装加成） | 这个值很可能决定回充速度，但没有在代码里追踪到。回充前的等待是代码里的常量，不变。 |
-| `--wear W`（实验性） | 把 `Life/DamageParameters/EquipmentCommon` 和 `ShieldCommon` 里的 `ExternalDamageParameters.DamageRates.Durability` 设为 W（206 个包） | 它应该也影响已有的物品。扣耐久的代码用整数计算，所以小于 1 的值的效果未知。下面的四档不改它。 |
+| `--battery-drain D` | 把 `ZonauEnergy_CostRate` 的每一项除以 D，位于 `Pack/Actor/Player.pack.zs` 的成员 `Component/ConditionParam/Player.game__component__ConditionParam.bgyml`（下标 0 很可能是不穿 Zonaite 防具时的倍率，其余是防具的等级） | 电池格数保存在存档里（`PlayerStatus.MaxEnergy`），不变。游戏代码把设备的耗电四舍五入到每秒整数单位。目前找到的最慢的设备是每秒 15，所以 D = 5 时三个 Zonaite 防具等级用它都是每秒耗 2；D 大于 15 时，最后一级可能四舍五入到完全不耗电。 |
+| `--battery-recharge R` | 把 `ZonauEnergy_HealRate` 的每一项乘以 R，位于同一成员（下标 1 很可能是 Zonaite 防具的套装加成） | 游戏代码执行 `energy += MaxEnergy / 3000 * (rate * 150) * dt`，所以原倍率 1 时，电池从空到满需要 20 秒（按 `dt` 以秒为单位计算），用这个选项后是 20 / R 秒。回充前的等待是代码里的常量，不变。 |
 
 ```bash
 python3.14 games/totk/scripts/make_gameplay_tuning.py --romfs <romfs.bin 所在文件夹> --into <mod 文件夹> \
@@ -730,6 +736,12 @@ python3.14 games/totk/scripts/make_gameplay_tuning.py --romfs <romfs.bin 所在�
 
 `--slots <文件夹> --base <mod 文件夹>` 用基础文件夹的副本生成 `<版本>-off`、`-moderate`、`-strong` 和 `-max` 四个文件夹。
 iPhone 或 iPad 在“设置”App 里从中选择，见 [install.zh-CN.md](install.zh-CN.md#耐久和电池预设windows)。Mac 启动器不读这些文件夹。
+
+没有改变每次攻击耐久损耗的选项，所以已有的物品按原来的速度磨损。`Life/DamageParameters/EquipmentCommon` 和 `ShieldCommon`
+里的 `DamageRates.Durability` 看起来像是对应的数值，但 1.4.3 的代码只在受到类型为 `Durability` 的攻击时才读它，而没有找到这样的
+攻击。近战命中固定扣 1，杖、投掷和 AI 请求每次加 1，都不经过任何倍率；弓很可能也一样，不过它的触发点没有单独确认。格挡
+通过另一个倍率扣耐久，每次至少扣 1。所以 `--durability K` 不会和别的数值叠加：新武器能多用 K 倍的次数，新盾在每次格挡损耗
+相同的情况下多用 K 倍。这些结论来自阅读代码，没有在设备上运行过。
 
 这些数值都还没有在 1.4.3 的游戏里实际看到效果。
 

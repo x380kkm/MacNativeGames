@@ -151,12 +151,12 @@ class Edits(Fixture):
                                        'Enemy_Bokoblin': (100, 'Enemy'), 'Weapon_Sword_002': (None, 'Sword')})
 
     def test_only_the_values_differ_from_the_original(self):
-        self.tune('--durability', 5, '--battery-drain', 4, '--battery-recharge', 3, '--wear', 0.5)
+        self.tune('--durability', 5, '--battery-drain', 4, '--battery-recharge', 3)
         for path in (*WEAPONS, PLAYER, TABLE):
             before, after = self.unpacked(path, False), self.unpacked(path)
             self.assertEqual(len(before), len(after), path)
             changed = {i & ~3 for i in range(len(before)) if before[i] != after[i]}
-            self.assertEqual(len(changed), {PLAYER: 6, TABLE: 4}.get(path, 2), path)   # fields of 4 bytes, each aligned to 4
+            self.assertEqual(len(changed), {PLAYER: 6, TABLE: 4}.get(path, 1), path)   # fields of 4 bytes, each aligned to 4
             if path != TABLE:
                 start = struct.unpack_from('<I', before, 12)[0]
                 self.assertEqual(before[:start], after[:start], path)                      # the member table
@@ -175,15 +175,6 @@ class Edits(Fixture):
         self.tune('--battery-recharge', 2)
         self.assertEqual(self.written(), [PLAYER])
 
-    def test_wear_sets_the_rate_in_both_commons(self):
-        self.tune('--wear', 0.5)
-        self.assertEqual(self.written(), sorted(WEAPONS))
-        for path, name in ((SWORD, EQUIPMENT), (EVENT_SWORD, EQUIPMENT), (TORCH, EQUIPMENT), (BUCKLER, SHIELD)):
-            self.assertEqual(self.damage_rate(path, name, 'Durability'), 0.5)
-            self.assertEqual(self.damage_rate(path, name, 'Arrow'), 1.0)
-            self.assertEqual(self.damage_rate(path, name, 'Water'), 0.5)
-        self.assertEqual(self.life(SWORD), 20)
-
     def test_the_limits_of_a_durability(self):
         import make_gameplay_tuning as tool
         self.assertEqual(tool.tuned('durability', 800, tool.Tuning(durability=100)), 80000)
@@ -198,7 +189,6 @@ class Edits(Fixture):
         self.assertIn('maximum durability x5: 8 of 8 values changed (packs: 4, table rows: 4), 12..20 -> 60..100', out)
         self.assertIn('battery drain /4: 4 of 4 values changed (packs: 1, table rows: 0)', out)
         self.assertIn('battery recharge x1: 0 of 2 values changed', out)
-        self.assertIn('wear per hit unchanged: 0 of 4 values changed', out)
         self.assertIn('6 files written', out)
 
     def test_it_runs_with_python_dash_i(self):
@@ -209,8 +199,7 @@ class Edits(Fixture):
         self.assertEqual(self.life(SWORD), 40)
 
     def test_values_out_of_range_are_refused(self):
-        for args in (('--durability', 0), ('--durability', 101), ('--battery-drain', 0), ('--battery-recharge', 'x'),
-                     ('--wear', -1), ('--wear', 11), ()):
+        for args in (('--durability', 0), ('--durability', 101), ('--battery-drain', 0), ('--battery-recharge', 'x'), ()):
             with self.subTest(args=args):
                 result = self.run_tool('--into', self.mod, *args)
                 self.assertEqual(result.returncode, 2, result.stderr)
@@ -235,9 +224,9 @@ class Manifest(Fixture):
         self.assertIn('the manifest would hold 6 files', check.stdout)
 
     def test_the_record_stays_out_of_the_manifest(self):
-        self.tune('--durability', 5, '--wear', 0.25)
+        self.tune('--durability', 5, '--battery-drain', 3)
         record = json.loads((self.mod/'.gameplay-tuning.json').read_text(encoding='utf-8'))
-        self.assertEqual((record['durability'], record['battery_drain'], record['wear']), (5, 1, 0.25))
+        self.assertEqual((record['durability'], record['battery_drain'], record['battery_recharge']), (5, 3, 1))
         self.assertNotIn('.gameplay-tuning.json', self.manifest())
 
     def test_the_manifest_ends_with_lf(self):
@@ -357,7 +346,9 @@ class Slots(Fixture):
                 self.assertEqual(self.rows(folder)['Weapon_Shield_001'][0], 12 * tuning.durability)
                 self.assertEqual(self.rates('ZonauEnergy_CostRate', folder)[3], f32(0.5 / tuning.drain))
                 self.assertEqual(self.rates('ZonauEnergy_HealRate', folder)[1], 1.5 * tuning.recharge)
-                self.assertEqual(self.damage_rate(SWORD, EQUIPMENT, 'Durability', folder), 1.0)   # wear stays until a value is decided
+                # Normal wear never reads this rate, so no slot edits it.
+                self.assertEqual(self.damage_rate(SWORD, EQUIPMENT, 'Durability', folder), 1.0)
+                self.assertEqual(self.damage_rate(BUCKLER, SHIELD, 'Durability', folder), 1.0)
 
     def test_the_base_folder_stays_as_it_was(self):
         self.build()
@@ -390,7 +381,7 @@ class Slots(Fixture):
     def test_the_options_of_the_two_modes_do_not_mix(self):
         base = self.base()
         for args in (('--slots', self.root/'mods'), ('--slots', self.root/'mods', '--base', base, '--durability', 5),
-                     ('--slots', self.root/'mods', '--base', base, '--replace'), ('--into', self.mod, '--base', base, '--wear', 1)):
+                     ('--slots', self.root/'mods', '--base', base, '--replace'), ('--into', self.mod, '--base', base, '--durability', 2)):
             with self.subTest(args=args):
                 self.assertEqual(self.run_tool(*args).returncode, 2)
 

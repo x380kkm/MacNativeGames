@@ -7,13 +7,16 @@ What each option edits (Tears of the Kingdom 1.4.3; other versions are untested)
                         results are whole numbers from 1 to MAX_DURABILITY. A save keeps each item's durability, so only
                         items obtained after the mod is in get the new maximum.
   --battery-drain D     every entry of ZonauEnergy_CostRate divided by D, in Player's ConditionParam (index 0 is very likely
-                        the rate without Zonaite armor, the others its levels). The save's battery size stays as it is.
+                        the rate without Zonaite armor, the others its levels). The game's code rounds a device's drain to
+                        whole units per second; the slowest device found uses 15, so with the last entry at 0.5 a D above
+                        15 could round its drain to nothing. The save's battery size stays as it is.
   --battery-recharge R  every entry of ZonauEnergy_HealRate times R, in the same member (index 1 is very likely the Zonaite
-                        armor set bonus). That this rate scales the recharge is likely, not traced in the code. The pause
-                        before the battery recharges is a constant in the game's code, so it stays.
-  --wear W              ExternalDamageParameters.DamageRates.Durability set to W in EquipmentCommon and ShieldCommon.
-                        Experimental: it would also reach items already owned, and the code that applies wear works in
-                        whole numbers, so what a value below 1 does is unknown.
+                        armor set bonus). The game's code does energy += MaxEnergy / 3000 * (rate * 150) * dt. The pause
+                        before the battery recharges is a constant in that code, so it stays.
+
+No option changes the wear per hit, so nothing here reaches items already owned. DamageRates.Durability in the
+EquipmentCommon and ShieldCommon members looks like the place, but 1.4.3's code reads that rate only for an incoming attack
+of the type Durability, and none was found. A melee hit costs a literal 1 (main+0x1cc4998) that no rate scales.
 
 Rules: values change in place, so the unpacked sizes stay and the resource size table needs no change. Every pack under
 Pack/ is read, and every copy of a member path gets the same edit. A run always starts from the original image, so
@@ -33,7 +36,7 @@ The output holds files made from the game's own: keep it out of the repository.
 
 Needs Python 3.14 (compression.zstd).
 usage: make_gameplay_tuning.py --romfs <folder | romfs.bin> --into <mod folder> [--durability 5] [--battery-drain 3]
-                               [--battery-recharge 3] [--wear 0.5] [--replace]
+                               [--battery-recharge 3] [--replace]
        make_gameplay_tuning.py --romfs <folder | romfs.bin> --slots <folder> --base <mod folder> [--version v143]
 """
 import argparse
@@ -52,22 +55,20 @@ from make_mod_manifest import VERSIONS, read_index, romfs_folder, write_mod_mani
 from romfs_formats import ZSDIC_PACK, Byml, compress_like, decompress, sarc_members, zstd_dictionaries   # noqa: E402
 
 WEAPON_LIFE = re.compile(r'Life/LifeParameters/Weapon_(Sword|Lsword|Spear|Shield|Bow)_[^/]+\.game__life__LifeParameters\.bgyml')
-WEAR_MEMBERS = ('Life/DamageParameters/EquipmentCommon.game__life__DamageParameters.bgyml',
-                'Life/DamageParameters/ShieldCommon.game__life__DamageParameters.bgyml')
 PLAYER_CONDITION = 'Component/ConditionParam/Player.game__component__ConditionParam.bgyml'
 PACK = re.compile(r'Pack/.+\.pack\.zs')
 ACTOR_INFO = re.compile(r'RSDB/GameActorInfo\.Product\.\d+\.rstbl\.byml\.zs')
 MAX_DURABILITY = 100000
 RECORD = '.gameplay-tuning.json'
 
-Tuning = namedtuple('Tuning', 'durability drain recharge wear', defaults=(1, 1, 1, None))
-Tuning.__doc__ = """The values of one mod: durability and recharge multiply, drain divides, wear replaces (None: unchanged)."""
+Tuning = namedtuple('Tuning', 'durability drain recharge', defaults=(1, 1, 1))
+Tuning.__doc__ = """The values of one mod: durability and recharge multiply, drain divides."""
 
-# The Settings pane's slots, in its order; a device starts on DEFAULT_SLOT. Each slot has its wear too: None leaves it unchanged.
+# The Settings pane's slots, in its order; a device starts on DEFAULT_SLOT.
 SLOTS = {'off': Tuning(),
-         'moderate': Tuning(durability=3, drain=2, recharge=2, wear=None),
-         'strong': Tuning(durability=5, drain=3, recharge=3, wear=None),
-         'max': Tuning(durability=10, drain=5, recharge=5, wear=None)}
+         'moderate': Tuning(durability=3, drain=2, recharge=2),
+         'strong': Tuning(durability=5, drain=3, recharge=3),
+         'max': Tuning(durability=10, drain=5, recharge=5)}
 DEFAULT_SLOT = 'strong'
 
 Value = namedtuple('Value', 'setting offset format')
@@ -87,11 +88,6 @@ def life_fields(doc):
     return [('durability', doc.field(doc.root, 'MaxLife', Byml.INT), '<i')]
 
 
-def wear_fields(doc):
-    rates = doc.child(doc.child(doc.root, 'ExternalDamageParameters'), 'DamageRates')
-    return [('wear', doc.field(rates, 'Durability', Byml.FLOAT), '<f')]
-
-
 def battery_fields(doc):
     out = []
     for key, setting in (('ZonauEnergy_CostRate', 'drain'), ('ZonauEnergy_HealRate', 'recharge')):
@@ -106,8 +102,6 @@ def member_fields(name):
     """The function that lists the fields this tool edits in the pack member `name`, or None for any other member."""
     if WEAPON_LIFE.fullmatch(name):
         return life_fields
-    if name in WEAR_MEMBERS:
-        return wear_fields
     return battery_fields if name == PLAYER_CONDITION else None
 
 
@@ -169,9 +163,7 @@ def tuned(setting, old, tuning):
         return old if factor == 1 or old <= 0 else min(MAX_DURABILITY, max(1, math.floor(old * factor + 0.5)))
     if setting == 'drain':
         return old / tuning.drain
-    if setting == 'recharge':
-        return old * tuning.recharge
-    return old if tuning.wear is None else tuning.wear
+    return old * tuning.recharge
 
 
 def edited(target, tuning):
@@ -242,8 +234,7 @@ def apply_tuning(mod, original, tuning, replace=False):
 def summary(original, tuning):
     """One line per setting: how many values, in how many packs and table rows, and the range before and after."""
     labels = {'durability': f'maximum durability x{tuning.durability:g}', 'drain': f'battery drain /{tuning.drain:g}',
-              'recharge': f'battery recharge x{tuning.recharge:g}',
-              'wear': 'wear per hit unchanged' if tuning.wear is None else f'wear per hit {tuning.wear:g}'}
+              'recharge': f'battery recharge x{tuning.recharge:g}'}
     lines = []
     for setting, label in labels.items():
         found = [(t, v) for t in original.targets for v in t.values if v.setting == setting]
@@ -262,8 +253,7 @@ def summary(original, tuning):
 
 def check_found(original, tuning):
     """Stop when a setting that changes something found no value: this is not the RomFS the tool knows."""
-    wanted = {'durability': tuning.durability != 1, 'drain': tuning.drain != 1, 'recharge': tuning.recharge != 1,
-              'wear': tuning.wear is not None}
+    wanted = {'durability': tuning.durability != 1, 'drain': tuning.drain != 1, 'recharge': tuning.recharge != 1}
     found = {v.setting for t in original.targets for v in t.values}
     missing = [setting for setting, wants in wanted.items() if wants and setting not in found]
     if missing:
@@ -285,7 +275,7 @@ def make_mod(mod, original, tuning, replace=False, slot=None, base=None):
     if found.misspelt:
         raise TuningError('manifest not written: ' + ', '.join(f'{a} (the RomFS has {b})' for a, b in found.misspelt))
     record = dict(tool='make_gameplay_tuning.py', slot=slot, durability=tuning.durability, battery_drain=tuning.drain,
-                  battery_recharge=tuning.recharge, wear=tuning.wear, base=str(base) if base else None)
+                  battery_recharge=tuning.recharge, base=str(base) if base else None)
     (mod/RECORD).write_text(json.dumps(record, indent=2) + '\n', encoding='utf-8', newline='\n')
     print(f'{mod/"manifest.tsv"}: {len(found.lines)} files ({len(found.lines) - len(found.added)} replaced, {len(found.added)} added)')
 
@@ -321,13 +311,6 @@ def multiplier(text):
     return value
 
 
-def wear_rate(text):
-    value = float(text)
-    if not 0 <= value <= 10:
-        raise argparse.ArgumentTypeError(f'{text}: give a number from 0 to 10')
-    return value
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('--romfs', type=Path, required=True, help='a folder holding romfs.bin and runtime-index.bin, or that '
@@ -341,19 +324,18 @@ def main():
     parser.add_argument('--durability', type=multiplier, help='maximum durability of weapons, shields and bows times this')
     parser.add_argument('--battery-drain', type=multiplier, help='battery drain divided by this')
     parser.add_argument('--battery-recharge', type=multiplier, help='battery recharge times this')
-    parser.add_argument('--wear', type=wear_rate, help='durability lost per hit, as a rate (the game has 1; experimental)')
     parser.add_argument('--replace', action='store_true', help='overwrite another mod\'s copy of a file this tool edits')
     args = parser.parse_args()
-    values = (args.durability, args.battery_drain, args.battery_recharge, args.wear)
+    values = (args.durability, args.battery_drain, args.battery_recharge)
     if args.slots and (any(v is not None for v in values) or args.replace):
-        parser.error('--slots takes its values from the slots\' table; --durability, --battery-drain, --battery-recharge, '
-                     '--wear and --replace go with --into')
+        parser.error('--slots takes its values from the slots\' table; --durability, --battery-drain, --battery-recharge '
+                     'and --replace go with --into')
     if args.slots and not (args.base and (args.base/'manifest.tsv').is_file()):
         parser.error('--slots needs --base, a mod folder with its manifest.tsv')
     if args.into and args.base:
         parser.error('--base goes with --slots')
     if args.into and all(v is None for v in values):
-        parser.error('name at least one of --durability, --battery-drain, --battery-recharge and --wear')
+        parser.error('name at least one of --durability, --battery-drain and --battery-recharge')
     romfs = romfs_folder(args.romfs)
     for need in (make_mod_manifest.image_file(romfs), romfs/'runtime-index.bin'):
         if not need.is_file():
@@ -364,8 +346,7 @@ def main():
             args.slots.mkdir(parents=True, exist_ok=True)
             build_slots(args.slots, args.base, args.version, original)
         else:
-            tuning = Tuning(*(1 if v is None else v for v in values[:3]), args.wear)
-            make_mod(args.into, original, tuning, args.replace)
+            make_mod(args.into, original, Tuning(*(1 if v is None else v for v in values)), args.replace)
     except (TuningError, ValueError, OSError) as error:
         sys.exit(str(error))
 
