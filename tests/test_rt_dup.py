@@ -97,6 +97,13 @@ class OneImageAtTwoSlots(unittest.TestCase):
         self.assertIn('deps["fout"][k] = GetOr(fout, k, "float");', service)
         self.assertIn('deps[@"fout"]', (NVN/'nvn_refl.m').read_text(encoding='utf-8'))
 
+    def test_every_kept_clear_goes_through_the_rule(self):
+        """The op itself, and the two planning walks that take a clear ahead of its place."""
+        self.assertIn('rt_dup_pend_clear(g->rt, c, g->clear_c, g->cc);', production(r'static void hoist_try\(void\) \{.*?\n}\n'))
+        self.assertIn('rt_dup_pend_clear(r2, c, clr, cc);', production(r'static void fuse_try\(void\) \{.*?\n}\n'))
+        self.assertIn('rt_dup_pend_clear(&R.rt, c, R.clear_c, R.cc);', production(r'case OP_CLEAR_COLOR: \{\n                const p_clear_color \*c = a;\n.*?break;\n            }\n'))
+        self.assertEqual((NVN/'nvn_mtl.m').read_text(encoding='utf-8').count('MTLClearColorMake(c->rgba[0]'), 1, 'a clear kept past the rule')
+
     def test_a_mid_pass_clear_reaches_the_other_tile_copies(self):
         clear = production(r'static void clear_quad\(const p_clear_color \*c\) \{.*?\n}\n')
         self.assertIn('unsigned others = rt_dup_other_slots(&R.rt, c->index);\n'

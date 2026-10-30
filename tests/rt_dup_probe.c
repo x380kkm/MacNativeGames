@@ -9,10 +9,9 @@
 /* the platform the production code is built for: a Mac's own headers define this macro too */
 #undef TARGET_OS_IPHONE
 #define TARGET_OS_IPHONE IOS_BUILD
-#ifndef GAME_BOTW   /* the build rt_dup_share_clears is compiled in */
 typedef struct { double red, green, blue, alpha; } MTLClearColor;
+static MTLClearColor MTLClearColorMake(double red, double green, double blue, double alpha) { return (MTLClearColor){red, green, blue, alpha}; }
 static struct { p_set_rt rt; uint8_t clear_c[8]; MTLClearColor cc[8]; } R;   /* the fields of nvn_mtl.m's replay state used here */
-#endif
 
 /* PRODUCTION_CODE */
 
@@ -110,10 +109,12 @@ static void stores_off(void) {
     CHECK(!unstored(0) && !unstored(1));
 }
 
-#ifndef GAME_BOTW
 static tex_t tx[2];
 static void pass(int n) { memset(&R, 0, sizeof R); R.rt.n = n; for (int i = 0; i < n; i++) R.rt.color[i] = &tx[i == 1]; }   /* slot 1 holds another image */
+/* ClearColor with no pass open, as OP_CLEAR_COLOR records it. */
+static void clear_through(int slot, float red) { p_clear_color c = {slot, 0xf, {red, 0, 0, 1}}; rt_dup_pend_clear(&R.rt, &c, R.clear_c, R.cc); }
 
+#ifndef GAME_BOTW
 /* BOTW_RT_DUP_CLEARS() is the call site in nvn_mtl.m. */
 static void clears_on(void) {
     /* a clear of the second slot reaches the first, and the other way round */
@@ -152,10 +153,41 @@ static void other_slots_on(void) {
     CHECK(rt_dup_other_slots(&R.rt, 0) == 0 && rt_dup_other_slots(&R.rt, 2) == 0);
 }
 
+/* Two clears of one image through different slots, with nothing drawn after them: on the Switch the later one is what memory
+   holds, whichever slot it came through. */
+static void later_clear_on(void) {
+    pass(3); clear_through(0, 0.25f); clear_through(2, 0.75f); BOTW_RT_DUP_CLEARS()
+    CHECK(R.clear_c[0] && !R.clear_c[1] && R.clear_c[2] && R.cc[0].red == 0.75 && R.cc[2].red == 0.75);
+    pass(3); clear_through(2, 0.25f); clear_through(0, 0.75f); BOTW_RT_DUP_CLEARS()
+    CHECK(R.clear_c[0] && !R.clear_c[1] && R.clear_c[2] && R.cc[0].red == 0.75 && R.cc[2].red == 0.75);
+    /* three slots, the last clear through the middle one */
+    pass(4); clear_through(0, 0.25f); clear_through(3, 0.5f); clear_through(2, 0.75f); BOTW_RT_DUP_CLEARS()
+    CHECK(R.cc[0].red == 0.75 && R.cc[2].red == 0.75 && R.cc[3].red == 0.75);
+    /* slot 1 holds another image: its clear stays its own, either way round */
+    pass(3); clear_through(0, 0.25f); clear_through(1, 0.5f); BOTW_RT_DUP_CLEARS()
+    CHECK(R.clear_c[0] && R.clear_c[1] && R.clear_c[2] && R.cc[0].red == 0.25 && R.cc[1].red == 0.5 && R.cc[2].red == 0.25);
+    pass(3); clear_through(1, 0.5f); clear_through(2, 0.25f); BOTW_RT_DUP_CLEARS()
+    CHECK(R.clear_c[0] && R.clear_c[1] && R.clear_c[2] && R.cc[0].red == 0.25 && R.cc[1].red == 0.5 && R.cc[2].red == 0.25);
+}
+
 static void clears_off(void) {
     pass(3); R.clear_c[2] = 1; BOTW_RT_DUP_CLEARS()
     CHECK(!R.clear_c[0] && R.clear_c[2]);
     CHECK(rt_dup_other_slots(&R.rt, 0) == 0 && rt_dup_other_slots(&R.rt, 2) == 0);
+    /* each slot keeps its own clear, as before the rule */
+    pass(3); clear_through(0, 0.25f); clear_through(2, 0.75f); BOTW_RT_DUP_CLEARS()
+    CHECK(R.clear_c[0] && R.clear_c[2] && R.cc[0].red == 0.25 && R.cc[2].red == 0.75);
+}
+#else
+/* Breath of the Wild attaches the first slot only, so a clear of either goes there, and the later one stands. */
+static void later_clear_botw(void) {
+    pass(3); clear_through(0, 0.25f); clear_through(2, 0.75f); BOTW_RT_DUP_CLEARS()
+    CHECK(R.clear_c[0] && !R.clear_c[2] && R.cc[0].red == 0.75);
+    pass(3); clear_through(2, 0.75f); clear_through(0, 0.25f); BOTW_RT_DUP_CLEARS()
+    CHECK(R.clear_c[0] && !R.clear_c[2] && R.cc[0].red == 0.25);
+    /* slot 1 holds another image */
+    pass(3); clear_through(1, 0.5f); clear_through(2, 0.25f); BOTW_RT_DUP_CLEARS()
+    CHECK(R.clear_c[0] && R.clear_c[1] && !R.clear_c[2] && R.cc[0].red == 0.25 && R.cc[1].red == 0.5);
 }
 #endif
 
@@ -165,9 +197,11 @@ int main(int argc, char **argv) {
     CHECK(rt_dup_on() == expected_on);
     draw_notes();
     if (expected_on) stores_on(); else stores_off();
-#ifndef GAME_BOTW
     tx[0].serial = 10; tx[1].serial = 11;
-    if (expected_on) { clears_on(); other_slots_on(); } else clears_off();
+#ifndef GAME_BOTW
+    if (expected_on) { clears_on(); other_slots_on(); later_clear_on(); } else clears_off();
+#else
+    later_clear_botw();
 #endif
     printf(fails ? "rt dup FAILED\n" : "rt dup ok\n");
     return fails != 0;

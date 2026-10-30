@@ -4572,7 +4572,9 @@ static int rt_dup_on(void) {
     return on;
 }
 #ifndef GAME_BOTW
-/* A pending clear reaches both tile copies: which one is stored is known only at the end of the pass. */
+/* A pending clear reaches both tile copies: which one is stored is known only at the end of the pass. rt_dup_pend_clear
+   sees to that for a clear op; this catches a clear that reaches the pass another way (a deferred pass's, whose slots are
+   mapped one by one, defer_q_superset). */
 static void rt_dup_share_clears(void) {
     if (!rt_dup_on()) return;
     for (int i = 1; i < R.rt.n && i < 8; i++) { int j = rt_dup_of(&R.rt, i); if (j >= 0 && R.clear_c[i] && !R.clear_c[j]) { R.clear_c[j] = 1; R.cc[j] = R.cc[i]; } }
@@ -4586,6 +4588,14 @@ static unsigned rt_dup_other_slots(const p_set_rt *r, int slot) {
     unsigned others = 0;
     for (int i = first; i < r->n && i < 8; i++) if (i != slot && (i == first || rt_dup_of(r, i) == first)) others |= 1u << i;
     return others;
+}
+/* A full clear kept for the next pass, one per slot. On the Switch each clear writes memory in turn, so the later of two
+   clears of one image through different slots stands: it goes to every slot of the image at once, over the earlier one.
+   clear_c and cc: the eight flags and colours it is kept in, r: the targets it was recorded against. */
+static void rt_dup_pend_clear(const p_set_rt *r, const p_clear_color *c, uint8_t *clear_c, MTLClearColor *cc) {
+    BOTW_RT_DUP_CLEAR_TO_FIRST(r, c)
+    unsigned slots = rt_dup_other_slots(r, c->index) | 1u << c->index;
+    for (int i = 0; i < 8; i++) if (slots >> i & 1) { clear_c[i] = 1; cc[i] = MTLClearColorMake(c->rgba[0], c->rgba[1], c->rgba[2], c->rgba[3]); }
 }
 /* Marks a slot a draw wrote through (rt_dup_unstored): its channels are not masked off and the fragment shader outputs to
    it. Open channels alone say nothing: a depth-only shader leaves them as they are, and marking its slots would keep a
@@ -11165,7 +11175,7 @@ static void hoist_try(void) {
                     if (c->index < 0 || c->index >= g->rt->n || !g->rt->color[c->index] || c->mask != 0xf) return;
                     const tex_t *t = g->rt->color[c->index];
                     if (has_sc && !(sc.x <= 0 && sc.y <= 0 && sc.x + sc.w >= (int)t->d.width && sc.y + sc.h >= (int)t->d.height)) return;
-                    g->clear_c[c->index] = 1; g->cc[c->index] = MTLClearColorMake(c->rgba[0], c->rgba[1], c->rgba[2], c->rgba[3]); }
+                    rt_dup_pend_clear(g->rt, c, g->clear_c, g->cc); }
                 else { const p_clear_ds *c = a; if (!g->rt->depth) return;
                     if (c->depth_mask) { g->clear_d = 1; g->cd = c->depth; } if (c->stencil_mask) { g->clear_s = 1; g->cs = (uint32_t)c->stencil; } }
                 g->sc = sc; g->has_sc = has_sc; g->ops[g->nops++] = p; break; }
@@ -11594,7 +11604,7 @@ static void fuse_try(void) {
             case OP_CLEAR_COLOR: { const p_clear_color *c = a; if (ncl >= 8 || c->index < 0 || c->index >= r2->n || !r2->color[c->index] || c->mask != 0xf) return;
                 const tex_t *t = r2->color[c->index];
                 if (has_sc && !(sc.x <= 0 && sc.y <= 0 && sc.x + sc.w >= (int)t->d.width && sc.y + sc.h >= (int)t->d.height)) return;
-                clr[c->index] = 1; cc[c->index] = MTLClearColorMake(c->rgba[0], c->rgba[1], c->rgba[2], c->rgba[3]); cl[ncl++] = p; break; }
+                rt_dup_pend_clear(r2, c, clr, cc); cl[ncl++] = p; break; }
             case OP_CLEAR_DS: { const p_clear_ds *c = a; if (ncl >= 8 || !r2->depth) return;
                 if (c->depth_mask) { cd_f = 1; cdv = c->depth; } if (c->stencil_mask) { cs_f = 1; csv = (uint32_t)c->stencil; } cl[ncl++] = p; break; }
             default: break;
@@ -12102,7 +12112,7 @@ static void clear_quad_core(id<MTL4RenderCommandEncoder> en, const uint32_t cfmt
     enc_r_draw(en, MTLPrimitiveTypeTriangle, 0, 3);
 }
 static void clear_quad(const p_clear_color *c) {
-    gpu_path_on("TOTK_GPU_MIDCLEAR", "mid-pass / partial-mask / scissored color clear"); BOTW_RT_DUP_CLEAR_TO_FIRST(c)
+    gpu_path_on("TOTK_GPU_MIDCLEAR", "mid-pass / partial-mask / scissored color clear"); BOTW_RT_DUP_CLEAR_TO_FIRST(&R.rt, c)
     const tex_t *t = R.rt.color[c->index];
     int f = R.rt.has_cview[c->index] && R.rt.cview[c->index].set_format ? R.rt.cview[c->index].format : t->d.format;
     if (cls_of(f)) MDIE("partial color clear of integer render target format %#x not implemented", f);
@@ -14367,7 +14377,7 @@ void mtl_exec(const uint8_t *p) {
                 if (g_rt_merged) rp_end();   // 续用的通道里来了清除：在此结束，清除照旧挂到下一个通道开头 | A clear arrived in a continued render pass: end it here, and the clear is attached to the start of the next render pass as usual
                 if (c->index < 0 || c->index >= R.rt.n || !R.rt.color[c->index]) { RED_ONCE(5, "清色目标 %d 无效", c->index); break; }
                 if (g_enc || c->mask != 0xf || !scissor_full(R.rt.color[c->index], &R.rt.cview[c->index], R.rt.has_cview[c->index])) { if ((c->mask & 0xf) && !S.render_disabled) clear_quad(c); break; }
-                R.clear_c[c->index] = 1; R.cc[c->index] = MTLClearColorMake(c->rgba[0], c->rgba[1], c->rgba[2], c->rgba[3]);
+                rt_dup_pend_clear(&R.rt, c, R.clear_c, R.cc);
                 break;
             }
             case OP_CLEAR_DS: {
