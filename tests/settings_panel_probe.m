@@ -102,10 +102,18 @@ void runtime_autoload_user_input(void) {}
 uint64_t runtime_now_ns(void) { return clock_gettime_nsec_np(CLOCK_UPTIME_RAW); }
 
 #define SIZE(w, h) ((uint64_t)(h) << 32 | (w))
-static void tick(void) { [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.02]]; }
-/* Key 1 toggles the panel on the main queue; a run loop pass may end before it is served (right after a key binding was
-   captured), so two. */
-static void press(unsigned key) { runtime_input_key_synthetic(key, 1); runtime_input_key_synthetic(key, 0); tick(); tick(); }
+/* Runs the run loop until what was queued to the main queue so far has run. The panel's rebuild and toggle and the window's
+   resize are queued there, and a run loop pass may end before the queue is served, so a wait of a fixed length fails at random
+   on a busy machine. The queue runs in order, so a block queued here runs after all of that. */
+static void tick(void) {
+    __block BOOL served = NO;
+    dispatch_async(dispatch_get_main_queue(), ^{ served = YES; });
+    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:2];
+    do [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
+    while (!served && limit.timeIntervalSinceNow > 0);
+    assert(served);
+}
+static void press(unsigned key) { runtime_input_key_synthetic(key, 1); runtime_input_key_synthetic(key, 0); tick(); }
 static void key_event(unsigned short code, BOOL down) {
     NSEvent *e = [NSEvent keyEventWithType:down ? NSEventTypeKeyDown : NSEventTypeKeyUp location:NSZeroPoint modifierFlags:0
                                  timestamp:0 windowNumber:window.windowNumber context:nil characters:@"x"
