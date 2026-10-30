@@ -185,6 +185,15 @@ class ExtraList(unittest.TestCase):
         seed = self.seed({KEY_A: [dict(tex={'8': '*'}), dict(tex={'8': '*_depth'})]})
         self.assertEqual(seed_windows.unserved(seed, {(KEY_A, PLAIN), (KEY_A, DEPTH)}), {})
 
+    def test_a_row_of_any_texture_is_answered_as_the_plain_2d_one_it_stands_for(self):
+        seed = self.seed({KEY_A: [dict(tex={'8': '2d'})]})
+        self.assertEqual(seed_windows.unserved(seed, {(KEY_A, '{"tex":{"8":"*"}}')}), {})
+
+    def test_a_failed_row_that_leaves_out_a_kind_is_found_under_the_name_it_was_translated_with(self):
+        row = '{"tex":{"8":"3d"}}'
+        seed = self.seed({KEY_A: [dict(tex={'8': '2d'})]}, [dict(key=KEY_A, variant=self.own(KEY_A, row), error='spirv-cross: no')])
+        self.assertEqual(seed_windows.unserved(seed, {(KEY_A, row)}), {self.own(KEY_A, row): 'spirv-cross: no'})
+
     def test_a_depth_texture_is_not_served_by_a_colour_variant_and_the_reason_is_named(self):
         variant = f'{KEY_A}-{seed_windows.suffix(seed_windows.answers_for(json.loads(DEPTH)))}'
         seed = self.seed({KEY_A: [dict(tex={'8': '*'})]}, [dict(key=KEY_A, variant=variant, error='spirv-cross: no')])
