@@ -77,7 +77,14 @@ void runtime_vpool_probe(void){
  expect(!map(&v1,&v2,0,0,PAGE),"reject virtual pool as physical source");
  expect(!map(&phys,&phys,0,0,PAGE),"reject physical pool as mapping target");
  expect(all(mem(&v1),0x3a,PAGE),"rejected requests did not change mappings");
- pool_init(&bad,raw+0x1000,size,0x104,0);expect(1,"reject CPU-visible unaligned physical pool");
+ const char *unaligned_env=getenv("TOTK_VPOOL_UNALIGNED");int unaligned=unaligned_env&&atoi(unaligned_env);
+ pool_init(&bad,raw+0x1000,size,0x104,unaligned);expect(1,"CPU-visible unaligned physical pool refused, or kept with TOTK_VPOOL_UNALIGNED=1");
+ if(unaligned){
+  expect(CALL(nvnMemoryPoolMap,&bad)==raw+0x1000,"unaligned physical pool maps its own storage");
+  expect(map(&v2,&bad,0,0,PAGE),"mapping request for an unaligned source is taken");
+  expect(all(mem(&v2),0,PAGE),"its virtual page keeps its own zero page");
+  CALL(nvnMemoryPoolFinalize,&bad);
+ }
  // Unmap V1 page 0: reads zero again, the physical page keeps its data for V2.
  expect(map(&v1,NULL,0,0,PAGE),"unmap virtual page");
  expect(all(mem(&v1),0,PAGE),"unmapped virtual page reads zero");

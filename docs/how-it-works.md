@@ -145,6 +145,20 @@ negative control, reaches 1.0 in none. The neighbouring-texel case draws only ev
 columns: drawn pixels stay at 0.25 and untouched pixels at zero, independent of when a tile is stored. A texture that
 is also `read()` is refused. The original game's 1.2.1 report found the squares gone with no store left before the decals.
 
+## Physical pools the host cannot alias
+
+A virtual memory pool shows pages of a physical pool a second time, through `mach_vm_remap`. Darwin remaps whole host
+pages of 16 KiB, while NVN accepts pool storage aligned to 4 KiB. A CPU-visible physical pool has to alias the game's own
+storage, so one that is only 4 KiB aligned cannot be aliased at all (a physical pool without CPU access gets aligned host
+storage and has no such limit). TOTK 1.4.3 makes one such pool at boot and one virtual view of it, at an address that
+differs per run, and checks neither result.
+
+On iPhone and iPad that pool stays valid over its own storage, and a mapping request for its pages leaves the virtual pages
+as the virtual pool's own, reading zero. Other requests in the same call are mapped as usual. What the CPU writes through
+the physical pool does not reach the virtual view, so it is the alias alone that is missing. Which resource lives in this
+pool is not known. `TOTK_VPOOL_UNALIGNED=0` refuses such a pool again, which fails its initialization and the whole mapping
+call; `TOTK_VPOOL_UNALIGNED=1` turns the new behaviour on on the Mac, where the default stays as it was.
+
 ## One image at two colour slots
 
 A game can attach the same texture level or layer at two colour slots and mask off the second one. The Switch writes straight
