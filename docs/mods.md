@@ -191,8 +191,9 @@ Without the flag the build leaves the folder untouched and prints the two comman
 manifest by hand.
 
 Nothing changes at run time: the game loads this folder and its manifest as before. An iPhone / iPad / Vision Pro
-app loads its player mod folder from its own `Documents/mods/<version>` when that folder holds a `manifest.tsv`
-(`games/totk/ios/Sources/main.m`; an app whose runtime was built before commit bd81859 loads none). That folder is in
+app loads its player mod folder from its own `Documents/mods/<version>` when that folder holds a `manifest.tsv`, or
+from `Documents/mods/<version>-<slot>` when its Settings row names a slot whose folder holds one
+(`games/totk/ios/Sources/main.m`; an app whose runtime was built before commit bd81859 loads none). Those folders are in
 the app's container on the device, which a build cannot fill, so there `--mod` merges the code patches only and
 `--install-mod-romfs` is refused. `games/totk/ios/tools/push_device_windows.py push-mod` copies a mod folder and its
 manifest there ([install.md](install.md#controller-button-icons-on-windows)).
@@ -623,8 +624,9 @@ App 自己会替换的文件），它其实什么都没替换——这时构建�
 不带这个参数时，构建完全不碰这个目录，只打印手动执行的两条命令。
 
 运行时没有任何变化，游戏仍然在启动时加载这个目录和清单；构建只负责复制和写清单。iPhone / iPad / Vision Pro 的
-App 从自己的 `Documents/mods/<版本>` 加载玩家 mod 目录，前提是里面有 `manifest.tsv`（`games/totk/ios/Sources/main.m`；
-运行时在提交 bd81859 之前构建的 App 不加载）。这个目录在设备上 App 的容器里，构建填不了，
+App 从自己的 `Documents/mods/<版本>` 加载玩家 mod 目录，前提是里面有 `manifest.tsv`；“设置”里的那一行选中的档位在
+`Documents/mods/<版本>-<档位>` 有带 `manifest.tsv` 的文件夹时，改从那里加载（`games/totk/ios/Sources/main.m`；
+运行时在提交 bd81859 之前构建的 App 不加载）。这些目录在设备上 App 的容器里，构建填不了，
 所以那里 `--mod` 只合并代码补丁，`--install-mod-romfs` 会被拒绝。
 `games/totk/ios/tools/push_device_windows.py push-mod` 把 mod 文件夹连同清单复制过去（见 [install.zh-CN.md](install.zh-CN.md#手柄按键图标windows)）。
 

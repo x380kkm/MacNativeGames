@@ -317,9 +317,9 @@ On the PC this was tried on (2026-10-30), `--style xbox --faces BAXY` took 33 s 
 python games/totk/ios/tools/push_device_windows.py push-mod <work>/mods/v143-xbox --bundle-id <id>
 ```
 
-`push-mod` first checks each file `manifest.tsv` lists, by size and SHA-256, as the game does at start. It then copies those files into `Documents/mods/v143`, `manifest.tsv` last, so the game never loads a half-copied mod. A copy that stopped goes on from the files already there. `deploy … --mod <folder>` does the same after the install. `status` lists the folders in `Documents/mods`. The game loads the mod at its next start. `--version` names another version's folder (`v143` by default).
+`push-mod` first checks each file `manifest.tsv` lists, by size and SHA-256, as the game does at start. It then copies those files into `Documents/mods/v143`, `manifest.tsv` last, so the game never loads a half-copied mod. A copy that stopped goes on from the files already there. `deploy … --mod <folder>` does the same after the install. `status` lists the folders in `Documents/mods`. The game loads the mod at its next start, unless the chosen row's slot folder from [Durability and battery presets](#durability-and-battery-presets-on-windows) is on the device: the app then loads that folder, so a new icon mod goes through `make_gameplay_tuning.py --slots` and `push-slots`. `--version` names another version's folder (`v143` by default).
 
-**To remove it:** `push_device_windows.py remove-mod --bundle-id <id>` removes `Documents/mods/v143`, `manifest.tsv` first; the next start plays with the Switch icons. In the Files app, deleting the `mods` folder (On My iPad › Tears of the Kingdom) does the same.
+**To remove it:** `push_device_windows.py remove-mod --bundle-id <id>` removes `Documents/mods/v143`, `manifest.tsv` first; the next start plays with the Switch icons. Slot folders on the device hold the icons too, so remove those as well. In the Files app, deleting the `mods` folder (On My iPad › Tears of the Kingdom) removes them all.
 
 `push-mod` and `remove-mod` have been rehearsed with `--simulate` only (2026-10-30).
 
@@ -327,7 +327,7 @@ python games/totk/ios/tools/push_device_windows.py push-mod <work>/mods/v143-xbo
 
 A RomFS mod made from your own game files can make weapons, shields and bows last longer and the Zonai battery drain slower and recharge faster. You make four folders on the PC, copy them to the device and choose one in the Settings app; the game loads it at its next start. [mods.md](mods.md#gameplay-tuning) says which values change.
 
-| Settings › TOTK › Mods › Durability and battery | Folder in `Documents/mods` | Maximum durability | Battery drain | Recharge |
+| Settings › Apps › Tears of the Kingdom › Mods › Durability and battery | Folder in `Documents/mods` | Maximum durability | Battery drain | Recharge |
 | --- | --- | --- | --- | --- |
 | Off | `v143-off` | unchanged | unchanged | unchanged |
 | Moderate | `v143-moderate` | ×3 | ÷2 | ×2 |
@@ -356,7 +356,7 @@ python games/totk/ios/tools/push_device_windows.py push-slots <work>/mods --bund
 
 `push-slots` checks every folder as `push-mod` does, then copies them one after the other (46 MiB each, 44 MiB for `v143-off`). A copy that stopped goes on where it stopped. To put your own mod in a slot, `push-mod <folder> --slot strong` copies one folder into `Documents/mods/v143-strong`; `deploy … --mod <folder> --slot strong` does the same after the install.
 
-**4. Choose a slot** in Settings › TOTK › Mods, and restart the game. With the debug log on, the log says which folder it loaded and why: `[totk] player mods: <folder> (mod slot strong)`.
+**4. Choose a slot** in Settings › Apps › Tears of the Kingdom › Mods › Durability and battery, and restart the game. With the debug log on, the log says which folder it loaded and why: `[totk] player mods: <folder> (mod slot strong)`.
 
 **To remove them:** `push_device_windows.py remove-mod --bundle-id <id> --slot strong` removes `Documents/mods/v143-strong`, and the other slots likewise. In the Files app, deleting the `mods` folder removes them all.
 

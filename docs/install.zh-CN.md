@@ -316,9 +316,9 @@ uv pip install --offline --python <工作目录>/tools/icons-venv/Scripts/python
 python games/totk/ios/tools/push_device_windows.py push-mod <工作目录>/mods/v143-xbox --bundle-id <id>
 ```
 
-`push-mod` 先像游戏启动时那样，按大小和 SHA-256 核对 `manifest.tsv` 列出的每个文件。然后把这些文件复制到 `Documents/mods/v143`，`manifest.tsv` 最后复制，所以游戏不会加载复制了一半的 mod。复制中断后再运行，会接着已有的文件继续。`deploy … --mod <文件夹>` 在安装之后做同样的事。`status` 列出 `Documents/mods` 里的文件夹。游戏下次启动时加载 mod。`--version` 指定别的版本的文件夹（默认 `v143`）。
+`push-mod` 先像游戏启动时那样，按大小和 SHA-256 核对 `manifest.tsv` 列出的每个文件。然后把这些文件复制到 `Documents/mods/v143`，`manifest.tsv` 最后复制，所以游戏不会加载复制了一半的 mod。复制中断后再运行，会接着已有的文件继续。`deploy … --mod <文件夹>` 在安装之后做同样的事。`status` 列出 `Documents/mods` 里的文件夹。游戏下次启动时加载 mod；但[耐久和电池预设](#耐久和电池预设windows)里选中的那一行的文件夹在设备上时，App 加载那个文件夹，所以新的图标 mod 要经过 `make_gameplay_tuning.py --slots` 和 `push-slots`。`--version` 指定别的版本的文件夹（默认 `v143`）。
 
-**删除：** `push_device_windows.py remove-mod --bundle-id <id>` 删掉 `Documents/mods/v143`，先删 `manifest.tsv`；下次启动就是 Switch 图标。在“文件”App 里删掉 `mods` 文件夹（我的 iPad › Tears of the Kingdom）效果一样。
+**删除：** `push_device_windows.py remove-mod --bundle-id <id>` 删掉 `Documents/mods/v143`，先删 `manifest.tsv`；下次启动就是 Switch 图标。设备上的档位文件夹也带着图标，所以也要删掉。在“文件”App 里删掉 `mods` 文件夹（我的 iPad › Tears of the Kingdom）会全部删除。
 
 `push-mod` 和 `remove-mod` 目前只用 `--simulate` 演练过（2026-10-30）。
 
@@ -326,7 +326,7 @@ python games/totk/ios/tools/push_device_windows.py push-mod <工作目录>/mods/
 
 用自己的游戏文件做出的 RomFS mod，可以让武器、盾和弓更耐用，让 Zonai 电池耗电更慢、回充更快。在电脑上做好四个文件夹，复制到设备，在“设置”App 里选一个；游戏下次启动时加载它。具体改哪些数值见 [mods.md](mods.md#gameplay-tuning-zh)。
 
-| 设置 › TOTK › 模组 › 耐久与电池 | `Documents/mods` 里的文件夹 | 最大耐久 | 耗电 | 回充 |
+| 设置 › App › Tears of the Kingdom › 模组 › 耐久与电池 | `Documents/mods` 里的文件夹 | 最大耐久 | 耗电 | 回充 |
 | --- | --- | --- | --- | --- |
 | 关 | `v143-off` | 不变 | 不变 | 不变 |
 | 中 | `v143-moderate` | ×3 | ÷2 | ×2 |
@@ -355,7 +355,7 @@ python games/totk/ios/tools/push_device_windows.py push-slots <工作目录>/mod
 
 `push-slots` 先像 `push-mod` 那样核对每个文件夹，再逐个复制（每个 46 MiB，`v143-off` 是 44 MiB）。复制中断后再运行，会从中断的地方继续。要把自己的 mod 放进某一档，`push-mod <文件夹> --slot strong` 把一个文件夹复制到 `Documents/mods/v143-strong`；`deploy … --mod <文件夹> --slot strong` 在安装之后做同样的事。
 
-**4. 选一档：**在“设置 › TOTK › 模组”里选择，然后重新启动游戏。打开日志时，日志会写出加载了哪个文件夹和原因：`[totk] player mods: <文件夹> (mod slot strong)`。
+**4. 选一档：**在“设置 › App › Tears of the Kingdom › 模组 › 耐久与电池”里选择，然后重新启动游戏。打开日志时，日志会写出加载了哪个文件夹和原因：`[totk] player mods: <文件夹> (mod slot strong)`。
 
 **删除：** `push_device_windows.py remove-mod --bundle-id <id> --slot strong` 删掉 `Documents/mods/v143-strong`，其它档同样处理。在“文件”App 里删掉 `mods` 文件夹会全部删除。
 
