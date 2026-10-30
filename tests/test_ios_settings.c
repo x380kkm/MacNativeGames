@@ -179,9 +179,15 @@ int main(int argc, char **argv) {
 
     /* Large textures, outside both layers: "save" leaves the runtime's defaults (TOTK_MIP_KEEP 1, the top level left out
        on iOS), "more" keeps the textures sampled at a chosen level too, "full" keeps every level. */
+    textures("auto", NULL, NULL);
     textures("save", NULL, NULL);
     textures("more", "2", NULL);
     textures("full", NULL, "0");
+    /* "auto" is "full" from the 6,500 MiB the measured peak needs, "save" below it and when the allowance is unknown. */
+    if (strcmp(totk_large_textures_auto(0), "save") || strcmp(totk_large_textures_auto((6500ull << 20) - 1), "save") ||
+        strcmp(totk_large_textures_auto(6500ull << 20), "full") || strcmp(totk_large_textures_auto(12000ull << 20), "full")) {
+        failures++; fprintf(stderr, "large textures auto picks the wrong mode\n");
+    }
     totk_texture_env te = {"keep", "keep"};
     if (totk_texture_env_build("off", &te) || totk_texture_env_build(NULL, &te) || strcmp(te.mip_keep, "keep") ||
         strcmp(te.mip_drop, "keep")) {

@@ -145,6 +145,71 @@ negative control, reaches 1.0 in none. The neighbouring-texel case draws only ev
 columns: drawn pixels stay at 0.25 and untouched pixels at zero, independent of when a tile is stored. A texture that
 is also `read()` is refused. The original game's 1.2.1 report found the squares gone with no store left before the decals.
 
+## Physical pools the host cannot alias
+
+A virtual memory pool shows pages of a physical pool a second time, through `mach_vm_remap`. Darwin remaps whole host
+pages of 16 KiB, while NVN accepts pool storage aligned to 4 KiB. A CPU-visible physical pool has to alias the game's own
+storage, so one that is only 4 KiB aligned cannot be aliased at all (a physical pool without CPU access gets aligned host
+storage and has no such limit). TOTK 1.4.3 makes one such pool at boot and one virtual view of it, at an address that
+differs per run, and checks neither result.
+
+On iPhone and iPad that pool stays valid over its own storage, and a mapping request for its pages leaves the virtual pages
+as the virtual pool's own, reading zero. Other requests in the same call are mapped as usual. What the CPU writes through
+the physical pool does not reach the virtual view, so it is the alias alone that is missing. Which resource lives in this
+pool is not known. The log says what is missing in red lines: one for the pool with its flags and size, and one for each
+request not mapped with its offsets and size (the first 8).
+
+`TOTK_VPOOL_UNALIGNED=0` refuses such a pool again, which fails its initialization and the whole mapping call. On iPhone and
+iPad, Settings › Apps › Tears of the Kingdom › Graphics troubleshooting › Unaligned memory pool › Off sets it.
+`TOTK_VPOOL_UNALIGNED=1` turns the new behaviour on on the Mac, where the default stays as it was.
+
+## One image at two colour slots
+
+A game can attach the same texture level or layer at two colour slots and mask off the second one. The Switch writes straight
+to memory, so that is harmless. An Apple GPU keeps one tile copy per attachment and stores each at the end of the pass, so
+the copy nothing was drawn through overwrites the other, in a different order per tile (scattered squares in Breath of the
+Wild's albedo). This is true of any tile-based GPU.
+
+The Breath of the Wild build leaves the second slot unattached. A pipeline names every slot's format and write mask, so
+here that would give each draw of the pass a key that no row of the seed or the archive has, and the warm-up would build
+pipelines that play no longer asks for. So on iPhone and iPad both slots stay attached and only the store changes: the first slot a draw wrote through is stored, or the first slot if none was, and the
+other copy is stored as DontCare. Pipelines, the archive and the warm-up are untouched. Clears reach both copies, because
+which one is stored is known only at the end of the pass, and a draw that samples such an image stores the pass first
+instead of reading the tile. A write through the slot that is not stored is lost, as it is in the Breath of the Wild build.
+
+`TOTK_RT_DUP=0` turns this off; on iPhone and iPad, Settings › Apps › Tears of the Kingdom › Graphics troubleshooting › One
+image at two colour slots › Off sets it. `TOTK_RT_DUP=1` turns it on on the Mac. Apple's Mac GPUs are tile-based too, so the
+rule holds there, but the Mac default stays off until it has been compared on one.
+
+## Occlusion queries
+
+The game culls objects with NVN's samples-passed counter: one bounding-sphere proxy per object is drawn against a small
+occluder depth target, and an object whose report is 0 is not drawn. Metal counts into a visibility buffer, one slot per
+render pass, and the completion handler of the submission sums the slots and writes the reports (`mtl_sub_commit`).
+
+An occlusion query only saves work: a wrong "visible" costs GPU time, a wrong "hidden" takes an object out of the picture.
+So on iPhone and iPad a report nobody can vouch for reads 1, the smallest count that is not "hidden". The game culls on
+zero or non-zero, and a light it scales by the count stays dark. Two kinds of report are raised:
+
+- a report not known to be complete: a counted draw never reached its counter (its shader, pipeline, pass or counter slot
+  was missing), or a command buffer of the submission failed. A failed chunk is found by its fence, which relies on its
+  completion handler running before the submission's final one;
+- every report of a frame in which all queries came to 0, and the reports at 0 in the 30 frames with queries after it. A
+  frame of nothing but zeros cannot be told from counters that did not count, and one report above 0 in the next frame says
+  nothing about the zeros beside it. Without those frames an object whose zeros are false would flip between shown and
+  hidden.
+  An iPad run (2026-10-30, 835 to 903 s) had 9 to 13 queries per submission, nearly all frames with every one at 0 and no
+  draw skipped; the log cannot say whether they were true. The 30 frames, half a second at 60 frames per second, are a
+  choice and not a measurement.
+
+Zeros elsewhere are trusted, so a false zero there is not caught: the same run has stretches of 11 queries per frame with
+10 at 0 and no frame of nothing but zeros, and the log cannot say whether those zeros are true either.
+
+`TOTK_OCCL_GUARD=0` turns this off; on iPhone and iPad, Settings › Apps › Tears of the Kingdom › Graphics troubleshooting ›
+Occlusion guard › Off sets it. `TOTK_OCCL_GUARD=1` turns it on on the Mac, where it is off by default. A draw held back while
+its shader is prepared raises its report on every platform, whatever the switch says. The `[occl]` line in the log counts
+what was measured ("with all of them 0") and both kinds of raised report ("raised to 1", "guard raised").
+
 ## The build (build_app.py)
 
 1. Detect XCI (HFS0 secure partition) or NSP (PFS0) by its header. Read the base Program NCA in place, extract ExeFS,

@@ -1,16 +1,20 @@
 """games/totk/ios/tools/seed_windows.py on a synthetic seed (no game files): the seed's device form as build_ipa.py writes
 it beside an IPA, its Metal libraries, what the runtime refuses, and the git tree hash that admits SPIRV-Cross's sources."""
+import contextlib
 import hashlib
+import io
 import json
 import sys
 import tempfile
 import unittest
+from argparse import Namespace
 from pathlib import Path
 from unittest.mock import patch
 
 TOOLS = Path(__file__).resolve().parents[1]/'games/totk/ios/tools'
 sys.path.insert(0, str(TOOLS))
 import seed_windows  # noqa: E402
+import shader_list  # noqa: E402  on sys.path through seed_windows
 
 CHAIN = 'totk-native-v8-unverified'
 A, B = 'a' * 64 + '-b7530f698e76', 'b' * 64 + '-b7530f698e76'   # two variants: <shader key>-<bind state>
@@ -110,6 +114,183 @@ class DeviceSeed(unittest.TestCase):
                     (seed/'seed-manifest.json').write_text(json.dumps(record))
                 with self.assertRaises(seed_windows.SeedError):
                     seed_windows.device_seed(seed, Path(d)/'out', CHAIN, Path(d)/'lists')
+
+
+KEY_A, KEY_B, KEY_C = 'a' * 64, 'b' * 64, 'c' * 64
+PLAIN = '{"attr":{},"fout":{"0":"float"},"img":{},"tex":{"8":"3d"}}'
+DEPTH = '{"attr":{},"fout":{},"img":{},"tex":{"8":"2darray_depth"}}'
+ADDED = 'extra lists: their rows added {} variants to the seed (a row a variant already serves adds none)'
+
+
+class ExtraList(unittest.TestCase):
+    """--extra-list: a device's own V rows in this seed only."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(); self.root = Path(self.tmp.name)
+        self.shared = self.root/'shader_list.tsv'
+        self.shared.write_text(f'# list\nV\t{KEY_C}\t{PLAIN}\nS\t{A}_b\t0\tt\n')
+        self.list = patch.object(seed_windows, 'SHADER_LIST', self.shared); self.list.start()
+
+    def tearDown(self):
+        self.list.stop(); self.tmp.cleanup()
+
+    def contribution(self, name, *rows):
+        path = self.root/name
+        path.write_text(''.join(line + '\n' for line in ('# Shaders this game met', *rows)))
+        return path
+
+    def seed(self, variants, skipped=()):
+        """A seed folder: {key: [deps of each row of its .variants]}, the shaders the game has, the failed translations."""
+        seed = self.root/'seed'; seed.mkdir()
+        for key, rows in variants.items():
+            (seed/f'{key}.variants').write_text(json.dumps([dict(variant=f'{key}-{i:012x}', deps=d) for i, d in enumerate(rows)]))
+        (seed/'seed-manifest.json').write_text(json.dumps(dict(skipped=list(skipped))))
+        (seed/'shader-keys.json').write_text(json.dumps(dict(keys=[KEY_A, KEY_B])))
+        return seed
+
+    def test_only_v_rows_are_taken_and_each_once(self):
+        one = self.contribution('one', f'V\t{KEY_A}\t{PLAIN}', 'R\tabcd\tm', 'B\tabcd\t-\t-\tm')
+        two = self.contribution('two', f'V\t{KEY_A}\t{PLAIN}', f'V\t{KEY_B}\t{DEPTH}')
+        self.assertEqual(seed_windows.extra_rows([one, two]), {(KEY_A, PLAIN), (KEY_B, DEPTH)})
+
+    def test_rows_come_back_in_the_lists_canonical_text(self):
+        row = f'V\t{KEY_A}\t' + '{"tex": {"8": "3d"}, "img": {}, "fout": {"0": "float"}, "attr": {}}'
+        self.assertEqual(seed_windows.extra_rows([self.contribution('one', row)]), {(KEY_A, PLAIN)})
+
+    def test_a_row_shader_list_py_could_not_read_stops_it(self):
+        for name, row in (('short key', f'V\tabc\t{PLAIN}'), ('not json', f'V\t{KEY_A}\t{{'), ('no deps', f'V\t{KEY_A}'),
+                          ('other fields', f'V\t{KEY_A}\t{{"size":{{}}}}')):
+            with self.subTest(name):
+                path = self.contribution('bad', f'V\t{KEY_B}\t{PLAIN}', row)   # a good row before it does not excuse it
+                with self.assertRaises(seed_windows.SeedError) as refused:
+                    seed_windows.extra_rows([path])
+                self.assertEqual(str(refused.exception), f'{path}:3: not a shader list V row')
+
+    def test_a_file_without_v_rows_stops_it(self):
+        with self.assertRaises(seed_windows.SeedError):
+            seed_windows.extra_rows([self.contribution('none', 'R\tabcd\tm')])
+
+    def test_the_list_is_the_shared_one_with_the_rows_after_it(self):
+        path = seed_windows.list_with_rows({(KEY_B, DEPTH), (KEY_A, PLAIN), (KEY_C, PLAIN)}, self.root/'seed.list.tsv')
+        merged = shader_list.ShaderList.load(path)
+        self.assertEqual(merged.variants, {(KEY_A, PLAIN), (KEY_B, DEPTH), (KEY_C, PLAIN)})
+        self.assertEqual(list(merged.warm), list(shader_list.ShaderList.load(self.shared).warm))
+        self.assertTrue(path.read_bytes().startswith(self.shared.read_bytes()))
+        # The same rows give the same file, so the seed is reused. A list in reverse order, since a set's order changes with
+        # each process's string hashes and could come out sorted by chance.
+        seed_windows.list_with_rows([(KEY_C, PLAIN), (KEY_B, DEPTH), (KEY_A, PLAIN)], path)
+        appended = path.read_bytes()[len(self.shared.read_bytes()):]
+        self.assertEqual(appended, f'V\t{KEY_A}\t{PLAIN}\nV\t{KEY_B}\t{DEPTH}\nV\t{KEY_C}\t{PLAIN}\n'.encode())
+
+    def test_a_row_is_served_as_the_runtime_picks(self):
+        seed = self.seed({KEY_A: [dict(tex={'8': '*'}), dict(tex={'8': '*_depth'})]})
+        self.assertEqual(seed_windows.unserved(seed, {(KEY_A, PLAIN), (KEY_A, DEPTH)}), {})
+
+    def test_a_row_of_any_texture_is_answered_as_the_plain_2d_one_it_stands_for(self):
+        seed = self.seed({KEY_A: [dict(tex={'8': '2d'})]})
+        self.assertEqual(seed_windows.unserved(seed, {(KEY_A, '{"tex":{"8":"*"}}')}), {})
+
+    def test_a_failed_row_that_leaves_out_a_kind_is_found_under_the_name_it_was_translated_with(self):
+        row = '{"tex":{"8":"3d"}}'
+        seed = self.seed({KEY_A: [dict(tex={'8': '2d'})]}, [dict(key=KEY_A, variant=self.own(KEY_A, row), error='spirv-cross: no')])
+        self.assertEqual(seed_windows.unserved(seed, {(KEY_A, row)}), {self.own(KEY_A, row): 'spirv-cross: no'})
+
+    def test_a_depth_texture_is_not_served_by_a_colour_variant_and_the_reason_is_named(self):
+        variant = f'{KEY_A}-{seed_windows.suffix(seed_windows.answers_for(json.loads(DEPTH)))}'
+        seed = self.seed({KEY_A: [dict(tex={'8': '*'})]}, [dict(key=KEY_A, variant=variant, error='spirv-cross: no')])
+        self.assertEqual(seed_windows.unserved(seed, {(KEY_A, PLAIN), (KEY_A, DEPTH)}), {variant: 'spirv-cross: no'})
+
+    def test_a_shader_of_another_game_version_is_named(self):
+        seed = self.seed({})
+        answers = seed_windows.answers_for(json.loads(PLAIN))
+        self.assertEqual(seed_windows.unserved(seed, {(KEY_C, PLAIN)}),
+                         {f'{KEY_C}-{seed_windows.suffix(answers)}': 'this game version has no such shader'})
+
+    def run_seed(self, *extra):
+        work = self.root/'work'
+        (work/'tools/bin').mkdir(parents=True, exist_ok=True)
+        for name in ('totk_xlate.exe', 'spirv-cross.exe'):
+            (work/'tools/bin'/name).write_bytes(b'')
+        args = Namespace(work=work, romfs=self.root/'romfs', modules=None, version='v143', extra_list=list(extra))
+        printed = io.StringIO()
+        with patch.object(seed_windows.subprocess, 'run', return_value=Namespace(returncode=0)) as prepare, \
+                contextlib.redirect_stdout(printed):
+            seed_windows.cmd_seed(args)
+        self.printed = printed.getvalue()
+        return [str(part) for part in prepare.call_args.args[0]]
+
+    def test_without_the_option_the_shared_list_is_used_as_it_is(self):
+        self.assertNotIn('--shader-list', self.run_seed())
+        self.assertFalse((self.root/'work/seed.list.tsv').exists())
+
+    def test_with_the_option_the_preparation_gets_the_merged_list(self):
+        (self.root/'work').mkdir()
+        seed = self.seed({KEY_A: [dict(tex={'8': '*'})]})
+        seed.rename(self.root/'work/seed')
+        cmd = self.run_seed(self.contribution('one', f'V\t{KEY_A}\t{PLAIN}'))
+        self.assertEqual(cmd[cmd.index('--shader-list') + 1], str((self.root/'work/seed.list.tsv').resolve()))
+        self.assertIn(f'V\t{KEY_A}\t{PLAIN}\n', (self.root/'work/seed.list.tsv').read_text())
+        self.assertIn('extra lists: the seed serves 1 of their 1 V rows\n', self.printed)
+        self.assertNotIn('not served', self.printed)
+
+    def test_the_run_says_how_many_rows_are_served_and_why_the_others_are_not(self):
+        (self.root/'work').mkdir()
+        answers = seed_windows.answers_for(json.loads(DEPTH))
+        failed = f'{KEY_A}-{seed_windows.suffix(answers)}'
+        missing = f'{KEY_C}-{seed_windows.suffix(seed_windows.answers_for(json.loads(PLAIN)))}'
+        seed = self.seed({KEY_A: [dict(tex={'8': '*'})]}, [dict(key=KEY_A, variant=failed, error='spirv-cross: no')])
+        seed.rename(self.root/'work/seed')
+        self.run_seed(self.contribution('one', f'V\t{KEY_A}\t{PLAIN}', f'V\t{KEY_A}\t{DEPTH}', f'V\t{KEY_C}\t{PLAIN}'))
+        lines = self.printed.splitlines()
+        self.assertIn('extra lists: the seed serves 1 of their 3 V rows', lines)
+        self.assertIn(f'  not served: {failed}: spirv-cross: no', lines)
+        self.assertIn(f'  not served: {missing}: this game version has no such shader', lines)
+
+    def own(self, key, deps):
+        return f'{key}-{seed_windows.suffix(seed_windows.answers_for(json.loads(deps)))}'
+
+    def seed_of_own_variants(self, key, *rows):
+        """A seed whose variants of this shader carry the names the preparation gives these rows."""
+        seed = self.seed({})
+        (seed/f'{key}.variants').write_text(json.dumps([dict(variant=self.own(key, d), deps=json.loads(d)) for d in rows]))
+        return seed
+
+    def test_rows_other_variants_serve_add_no_variant(self):
+        (self.root/'work').mkdir()
+        seed = self.seed({KEY_A: [dict(tex={'8': '*'}), dict(tex={'8': '*_depth'})]})
+        seed.rename(self.root/'work/seed')
+        self.run_seed(self.contribution('one', f'V\t{KEY_A}\t{PLAIN}', f'V\t{KEY_A}\t{DEPTH}'))
+        lines = self.printed.splitlines()
+        self.assertIn('extra lists: the seed serves 2 of their 2 V rows', lines)
+        self.assertIn(ADDED.format(0), lines)
+
+    def test_a_variant_kept_for_a_row_is_counted(self):
+        (self.root/'work').mkdir()
+        seed = self.seed_of_own_variants(KEY_A, PLAIN)
+        seed.rename(self.root/'work/seed')
+        self.run_seed(self.contribution('one', f'V\t{KEY_A}\t{PLAIN}', f'V\t{KEY_A}\t{DEPTH}'))
+        lines = self.printed.splitlines()
+        self.assertIn('extra lists: the seed serves 1 of their 2 V rows', lines)
+        self.assertIn(ADDED.format(1), lines)
+
+    def test_two_rows_with_one_translation_added_one_variant(self):
+        star, plain = '{"tex":{"8":"*"}}', '{"tex":{"8":"2d"}}'
+        seed = self.seed_of_own_variants(KEY_A, star)
+        self.assertEqual(seed_windows.added_variants(seed, {(KEY_A, star), (KEY_A, plain)}), {self.own(KEY_A, star)})
+
+    def test_the_default_variant_is_not_added_by_a_row(self):
+        row = '{"attr":{},"fout":{},"img":{},"tex":{}}'
+        self.assertEqual(self.own(KEY_A, row), A)
+        self.assertEqual(seed_windows.added_variants(self.seed_of_own_variants(KEY_A, row), {(KEY_A, row)}), set())
+
+    def test_the_shadow_map_variant_is_not_added_by_a_row(self):
+        default, depth = '{"attr":{},"fout":{},"img":{},"tex":{}}', '{"attr":{},"fout":{},"img":{},"tex":{"8":"*_depth"}}'
+        seed = self.seed_of_own_variants(KEY_A, default, depth)
+        (seed/f'{A}_b.json').write_text(json.dumps(dict(compare_slots=[8])))   # the translation that adds this job
+        self.assertEqual(seed_windows.added_variants(seed, {(KEY_A, depth)}), set())
+
+    def test_a_row_the_shared_list_has_too_added_nothing(self):
+        seed = self.seed_of_own_variants(KEY_C, PLAIN)
+        self.assertEqual(seed_windows.added_variants(seed, {(KEY_C, PLAIN)}), set())
 
 
 class SpirvCrossSources(unittest.TestCase):

@@ -1,4 +1,5 @@
 #pragma once
+#include <stdint.h>
 
 /* The iPad Settings pane as the environment the runtime reads at launch. Kept free of UIKit so
    tests/test_ios_settings.py checks the tables on a Mac.
@@ -49,6 +50,8 @@ typedef struct {
 /* mode is one of the row's values; 0 when it is not (out is untouched). */
 int totk_texture_env_build(const char *mode, totk_texture_env *out);
 const char *totk_large_textures_default(void);
+/* What the row's "auto" means on this device: available_bytes is os_proc_available_memory() at launch, 0 when unknown. */
+const char *totk_large_textures_auto(uint64_t available_bytes);
 
 /* Which layer of the pane owns a key. ALWAYS: the pane's other rows (overlays, controllers, ...), handed over whatever
    the switch says. A key that moves to a layer must be listed here, so main.m's filter and the tests share one table. */

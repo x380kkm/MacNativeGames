@@ -120,6 +120,7 @@ class IOSSettings(unittest.TestCase):
         self.assertEqual(row['Type'], 'PSMultiValueSpecifier')
         self.assertEqual(len(row['Values']), len(row['Titles']))
         self.assertIn(row['DefaultValue'], row['Values'])
+        self.assertEqual(row['DefaultValue'], 'auto')
         executable = self._helper()
         for value in row['Values']:
             with self.subTest(value=value):
@@ -157,6 +158,25 @@ class IOSSettings(unittest.TestCase):
             self.assertEqual(rows[key]['Type'], 'PSToggleSwitchSpecifier')
             self.assertIs(rows[key]['DefaultValue'], True)
 
+
+    def test_behaviours_the_code_turns_on_have_an_off_row(self):
+        # The default is the code's (on for Tears of the Kingdom on iOS), so a row must not hand a value over until the
+        # player chooses Off: main.m skips an empty string, while a switch would hand "1" over at every launch. The rows
+        # leave the Breath of the Wild pane, whose build has these behaviours off.
+        nvn = ROOT / 'games/totk/third_party/d2r_gfx/gfx/nvn'
+        rows = self._rows()
+        for key, reader in (('TOTK_OCCL_GUARD', 'nvn_mtl.m'), ('TOTK_RT_DUP', 'nvn_mtl.m'),
+                            ('TOTK_VPOOL_UNALIGNED', 'totk_vpool.c')):
+            with self.subTest(key=key):
+                row = rows[key]
+                self.assertEqual(row['Type'], 'PSMultiValueSpecifier')
+                self.assertEqual(row['TOTKApp'], 'totk')
+                self.assertEqual(row['DefaultValue'], '')
+                self.assertEqual(row['Values'], ['', '0'])
+                self.assertEqual(len(row['Titles']), 2)
+                self.assertIn(f'getenv("{key}")', (nvn / reader).read_text(encoding='utf-8'))
+        main = (ROOT / 'games/totk/ios/Sources/main.m').read_text(encoding='utf-8')
+        self.assertIn('[value length] && [value length] < 64', main)
 
     def test_every_row_is_applied_at_launch(self):
         # main.m registers every TOTK_* row that has a DefaultValue and hands it to the runtime as an environment
