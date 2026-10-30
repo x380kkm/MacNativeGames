@@ -166,7 +166,7 @@ class PlayerMods(unittest.TestCase):
         import push_device_windows
         game = TOOLS.parents[1]
         main = (TOOLS.parent/'Sources/main.m').read_text(encoding='utf-8')
-        self.assertIn('NSString *mods = [docs stringByAppendingPathComponent:@"mods/" TOTK_GAME_DIR], *chosen = nil, *why;', main)
+        self.assertIn('    apply_player_mods([docs stringByAppendingPathComponent:@"mods/" TOTK_GAME_DIR]);', main)
         self.assertIn('[mods stringByAppendingFormat:@"-%s",slot]', main)
         self.assertEqual(push_device_windows.mod_target('v143', 'strong'), 'v143-strong')
         slot_first = (main.index('[slotMods stringByAppendingPathComponent:@"manifest.tsv"]'),
@@ -174,8 +174,8 @@ class PlayerMods(unittest.TestCase):
         self.assertLess(*slot_first)
         self.assertIn('if (chosen) setenv("TOTK_ROMFS_MODS",chosen.fileSystemRepresentation,0);', main)   # 0: a devicectl value wins
         self.assertEqual(main.count('setenv("TOTK_ROMFS_MODS"'), 1)
-        self.assertLess(main.index('setenv("TOTK_ROMFS_MODS"'), main.index('host_argv[0] = strdup'))   # before the game starts
-        self.assertLess(main.index('    apply_settings();'), main.index('getenv("TOTK_MOD_SLOT")'))   # the pane's row is handed over first
+        self.assertLess(main.index('    apply_settings();'), main.index('    apply_player_mods('))   # the pane's row is handed over first
+        self.assertLess(main.index('    apply_player_mods('), main.index('host_argv[0] = strdup'))   # before the game starts
         self.assertIn('"[totk] player mods: %s (%s)\\n"', main)
         self.assertIn('@"mods/" TOTK_GAME_DIR', (game/'app/launcher.m').read_text(encoding='utf-8'))
         dirs = set(re.findall(r'#define TOTK_GAME_DIR "(\w+)"', (game/'runtime/game_version.h').read_text(encoding='utf-8')))

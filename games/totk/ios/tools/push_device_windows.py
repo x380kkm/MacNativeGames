@@ -250,6 +250,9 @@ def push_slots(box, folder, version=MOD_VERSION, log=print, progress=None):
     """The folders <version>-<slot> below `folder` into Documents/mods, one slot after the other. Every folder is checked
     before the first one is copied. Returns slot -> what push_mod did."""
     mods = {slot: folder/mod_target(version, slot) for slot in MOD_SLOTS}
+    missing = [mod.name for mod in mods.values() if not (mod/'manifest.tsv').is_file()]
+    require(not missing, f'{folder} holds no {", ".join(missing)} with a manifest.tsv: give the folder that '
+            'make_gameplay_tuning.py --slots wrote them into')
     for mod in mods.values():
         mod_files(mod)
     return {slot: push_mod(box, mod, mod_target(version, slot), log, progress) for slot, mod in mods.items()}

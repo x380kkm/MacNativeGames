@@ -1,5 +1,5 @@
 """games/totk/scripts/make_gameplay_tuning.py on a small fake RomFS made here (no game data): the fields it edits, what it
-writes and refuses, values that never compound, the manifest, and the four slot folders."""
+writes and refuses, values that never compound, the manifest, the four slot folders, and a damaged RomFS."""
 import hashlib
 import importlib.util
 import json
@@ -376,6 +376,9 @@ class Slots(Fixture):
         (base/SWORD).parent.mkdir(parents=True); (base/SWORD).write_bytes(b'another mod\'s pack')
         result = self.run_tool('--slots', self.root/'mods', '--base', base)
         self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Weapon_Sword_001.pack.zs', result.stderr)
+        self.assertIn(f'take it out of {base}', result.stderr)
+        self.assertNotIn('--replace', result.stderr)   # --slots refuses that option
         self.assertFalse((self.root/'mods').exists() and any((self.root/'mods').iterdir()))
 
     def test_the_options_of_the_two_modes_do_not_mix(self):
@@ -388,15 +391,58 @@ class Slots(Fixture):
     def test_the_slots_are_the_panes_and_the_push_tools(self):
         import make_gameplay_tuning as tool
         import push_device_windows as push
-        rows = plistlib.loads((ROOT/'games/totk/ios/Settings.bundle/Root.plist').read_bytes())['PreferenceSpecifiers']
-        row = next(item for item in rows if item.get('Key') == 'TOTK_MOD_SLOT')
+        import settings_strings
+        pane = plistlib.loads((ROOT/'games/totk/ios/Settings.bundle/Root.plist').read_bytes())
+        row = next(item for item in pane['PreferenceSpecifiers'] if item.get('Key') == 'TOTK_MOD_SLOT')
         self.assertEqual(list(tool.SLOTS), row['Values'])
-        self.assertEqual(tool.DEFAULT_SLOT, row['DefaultValue'])
         self.assertEqual(tuple(tool.SLOTS), push.MOD_SLOTS)
+        french = json.loads((ROOT/'games/totk/ios/tools/settings_fr.json').read_text(encoding='utf-8'))
+        shown = settings_strings.tables(pane, french)
         for slot, title in zip(row['Values'], row['Titles']):
-            tuning = tool.SLOTS[slot]
-            if slot != 'off':   # the numbers the pane shows are the table's
-                self.assertIn(f'durability ×{tuning.durability}, drain ÷{tuning.drain}, recharge ×{tuning.recharge}', title)
+            durability, drain, recharge = tool.SLOTS[slot]
+            if slot != 'off':   # the numbers the pane shows in each language are the table's
+                self.assertIn(f'durability ×{durability}, drain ÷{drain}, recharge ×{recharge}', shown['en'][title])
+                self.assertIn(f'耐久 ×{durability}，耗电 ÷{drain}，回充 ×{recharge}', shown['zh-Hans'][title])
+                self.assertIn(f'durabilité ×{durability}, consommation ÷{drain}, recharge ×{recharge}', shown['fr'][title])
+
+
+class DamagedRomfs(Fixture):
+    """A damaged RomFS ends the run with one line that says what is wrong, and the mod folder is not made."""
+    def assert_stops(self, romfs, *expected):
+        result = subprocess.run([sys.executable, str(SCRIPT), '--romfs', str(romfs), '--into', str(self.mod), '--durability', '5'],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(len(result.stderr.strip().splitlines()), 1, result.stderr)
+        for text in expected:
+            self.assertIn(text, result.stderr)
+        self.assertFalse(self.mod.exists())
+
+    def romfs_copy(self):
+        copy = self.root/'romfs'
+        shutil.copytree(self.romfs, copy)
+        return copy
+
+    def test_a_cut_image_says_which_file_and_how_many_bytes(self):
+        romfs = self.romfs_copy()
+        image = (romfs/'romfs.bin').read_bytes()
+        (romfs/'romfs.bin').write_bytes(image[:len(image) // 2])
+        self.assert_stops(romfs, 'romfs.bin', 'bytes at offset', 'damaged or incomplete')
+
+    def test_an_index_too_short_to_hold_its_header(self):
+        romfs = self.romfs_copy()
+        (romfs/'runtime-index.bin').write_bytes(b'TOTKRFS1')
+        self.assert_stops(romfs, 'runtime-index.bin', 'not a RomFS index')
+
+    def test_an_image_of_zeros_stops_at_the_dictionary_pack(self):
+        romfs = self.romfs_copy()
+        (romfs/'romfs.bin').write_bytes(bytes((romfs/'romfs.bin').stat().st_size))
+        self.assert_stops(romfs, 'Pack/ZsDic.pack.zs', 'not a readable zstd frame')
+
+    def test_a_member_too_short_to_read_names_its_pack(self):
+        import compression.zstd as zstd
+        from test_mod_manifest import fake_romfs
+        cut = zstd.compress(self.sarc({CONDITION: b'YB\x07\0'}), level=3, zstd_dict=self.dictionaries[3])
+        self.assert_stops(fake_romfs(self.root/'romfs', {**self.files, PLAYER: cut}), PLAYER)
 
 
 if __name__ == '__main__':

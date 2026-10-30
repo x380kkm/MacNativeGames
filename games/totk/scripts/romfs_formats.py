@@ -29,8 +29,12 @@ ZSTD_MAGIC = b'\x28\xb5\x2f\xfd'
 
 
 def zstd_dictionaries(zsdic_pack):
-    """Dictionary id -> zstd.ZstdDict of each dictionary in Pack/ZsDic.pack.zs, given that file's stored bytes."""
-    pack = zstd.decompress(zsdic_pack)
+    """Dictionary id -> zstd.ZstdDict of each dictionary in Pack/ZsDic.pack.zs, given that file's stored bytes. Raises
+    ValueError when those bytes are not a zstd frame."""
+    try:
+        pack = zstd.decompress(zsdic_pack)
+    except zstd.ZstdError as error:
+        raise ValueError(f'not a readable zstd frame: {error}') from error
     dictionaries = {}
     for lo, hi in sarc_members(pack).values():
         dictionary = zstd.ZstdDict(pack[lo:hi])

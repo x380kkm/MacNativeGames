@@ -275,10 +275,10 @@ class Mods(unittest.TestCase):
         self.assertFalse(slot.exists())
         self.assertTrue((self.on_device/'manifest.tsv').is_file())
 
-    def slots(self):
+    def slots(self, version='v143'):
         """A folder holding the four slot folders, as make_gameplay_tuning.py --slots leaves them."""
         for slot in push.MOD_SLOTS:
-            self.mod({FONT: f'{slot} font'.encode(), LAYOUT: f'{slot} layout'.encode()}, f'mods/v143-{slot}')
+            self.mod({FONT: f'{slot} font'.encode(), LAYOUT: f'{slot} layout'.encode()}, f'mods/{version}-{slot}')
         return self.root/'mods'
 
     def test_push_slots_copies_every_slot(self):
@@ -301,6 +301,16 @@ class Mods(unittest.TestCase):
             push.push_slots(self.box, folder, log=quiet)
         self.assertEqual(self.box.uploads, [])
 
+    def test_push_slots_names_the_tool_that_makes_the_folders(self):
+        folder = self.slots()
+        (folder/'v143-max/manifest.tsv').unlink()
+        with self.assertRaisesRegex(push.PushError, r'no v143-max with a manifest\.tsv.*make_gameplay_tuning\.py --slots'):
+            push.push_slots(self.box, folder, log=quiet)
+        for given in (self.root/'never built', folder/'v143-strong'):   # the second is a slot folder in place of their parent
+            with self.assertRaisesRegex(push.PushError, r'no v143-off, .*make_gameplay_tuning\.py --slots'):
+                push.push_slots(self.box, given, log=quiet)
+        self.assertEqual(self.box.uploads, [])
+
     def test_push_slots_goes_on_where_it_stopped(self):
         folder = self.slots()
         self.box.stop = 3   # the two files of the first slot, then one of the second
@@ -313,6 +323,14 @@ class Mods(unittest.TestCase):
         self.assertEqual(done, {push.MOD_SLOTS[0]: 'present', **{slot: 'copied' for slot in push.MOD_SLOTS[1:]}})
         self.assertEqual(len(self.box.uploads), 1 + 2 * 2)   # what the second slot still lacked, then the last two whole
         self.assertTrue((second/'manifest.tsv').is_file())
+
+    def test_push_slots_takes_its_version_from_the_command_line(self):
+        import subprocess
+        folder = self.slots('v121')
+        pushed = subprocess.run([sys.executable, str(TOOLS/'push_device_windows.py'), 'push-slots', str(folder), '--version', 'v121',
+                                 '--bundle-id', 'a.b', '--simulate', str(self.root/'device')], capture_output=True, text=True)
+        self.assertEqual(pushed.returncode, 0, pushed.stderr)
+        self.assertEqual(sorted(p.name for p in (self.root/'device'/push.MODS).iterdir()), sorted(f'v121-{slot}' for slot in push.MOD_SLOTS))
 
     def test_the_commands_with_simulate(self):
         import subprocess

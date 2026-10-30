@@ -60,16 +60,16 @@ PACK = re.compile(r'Pack/.+\.pack\.zs')
 ACTOR_INFO = re.compile(r'RSDB/GameActorInfo\.Product\.\d+\.rstbl\.byml\.zs')
 MAX_DURABILITY = 100000
 RECORD = '.gameplay-tuning.json'
+UNREADABLE = (AssertionError, IndexError, KeyError, ValueError, struct.error)   # what the format code raises on a damaged file
 
 Tuning = namedtuple('Tuning', 'durability drain recharge', defaults=(1, 1, 1))
 Tuning.__doc__ = """The values of one mod: durability and recharge multiply, drain divides."""
 
-# The Settings pane's slots, in its order; a device starts on DEFAULT_SLOT.
+# The Settings pane's slots, in its order.
 SLOTS = {'off': Tuning(),
          'moderate': Tuning(durability=3, drain=2, recharge=2),
          'strong': Tuning(durability=5, drain=3, recharge=3),
          'max': Tuning(durability=10, drain=5, recharge=5)}
-DEFAULT_SLOT = 'strong'
 
 Value = namedtuple('Value', 'setting offset format')
 Value.__doc__ = """One 4-byte field this tool edits: the Tuning field that sets it, its offset in the unpacked file and its
@@ -135,10 +135,17 @@ def read_original(romfs):
     index = read_index(romfs/'runtime-index.bin')
     with make_mod_manifest.image_file(romfs).open('rb') as image:
         def read(path):
-            offset, size = index[path]; image.seek(offset); data = image.read(size); assert len(data) == size; return data
+            offset, size = index[path]; image.seek(offset); data = image.read(size)
+            if len(data) != size:
+                raise TuningError(f'{image.name}: {path} is {size} bytes at offset {offset}, and the image holds only '
+                                  f'{len(data)} of them: the image is damaged or incomplete')
+            return data
         if ZSDIC_PACK not in index:
             raise TuningError(f'{romfs} holds no {ZSDIC_PACK}: is this Tears of the Kingdom\'s RomFS?')
-        dictionaries = zstd_dictionaries(read(ZSDIC_PACK))
+        try:
+            dictionaries = zstd_dictionaries(read(ZSDIC_PACK))
+        except UNREADABLE as error:
+            raise TuningError(f'{ZSDIC_PACK}: {error!r}') from error
         packs = sorted(p for p in index if PACK.fullmatch(p) and p != ZSDIC_PACK)
         tables = sorted(p for p in index if ACTOR_INFO.fullmatch(p))
         targets, actors = [], set()
@@ -147,7 +154,7 @@ def read_original(romfs):
             try:
                 data = decompress(stored, dictionaries)
                 values = row_values(data, actors) if ACTOR_INFO.fullmatch(path) else pack_values(data)
-            except (AssertionError, KeyError, ValueError) as error:
+            except UNREADABLE as error:
                 raise TuningError(f'{path}: {error!r}') from error
             if values:
                 targets.append(Target(path, stored, data, values))
@@ -205,8 +212,9 @@ def plan(mod, original, tuning, replace):
 
 
 def refused_message(refused):
+    """What stops a run that would overwrite the other mods' files `refused`."""
     return (f'{", ".join(refused[:5])}{" and others" if len(refused) > 5 else ""}: differ(s) from the original in more than '
-            'the values this tool edits (another mod\'s file): nothing written; pass --replace to overwrite')
+            'the values this tool edits (another mod\'s file): nothing written')
 
 
 def apply_tuning(mod, original, tuning, replace=False):
@@ -214,7 +222,7 @@ def apply_tuning(mod, original, tuning, replace=False):
     right, files removed)."""
     changes, refused = plan(mod, original, tuning, replace)
     if refused:
-        raise TuningError(refused_message(refused))
+        raise TuningError(f'{refused_message(refused)}; pass --replace to overwrite')
     written, size, same, removed = 0, 0, 0, 0
     for target, data, stored, ours in changes:
         file = mod/target.path
@@ -289,7 +297,7 @@ def build_slots(folder, base, version, original):
     for tuning in SLOTS.values():
         refused = plan(base, original, tuning, False)[1]
         if refused:
-            raise TuningError(refused_message(refused))
+            raise TuningError(f'{refused_message(refused)}; a slot cannot hold it, so take it out of {base}')
     for slot, tuning in SLOTS.items():
         target, staging, previous = slots[slot], folder/f'.{slots[slot].name}.new', folder/f'.{slots[slot].name}.old'
         print(f'--- slot {slot}')

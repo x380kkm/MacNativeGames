@@ -26,6 +26,11 @@ class Formats(unittest.TestCase):
     def test_the_dictionaries_come_by_their_id(self):
         self.assertEqual(sorted(self.dictionaries), [1, 3])
 
+    def test_a_dictionary_pack_that_is_not_a_zstd_frame_is_refused(self):
+        for raw in (bytes(64), self.pack[:20]):
+            with self.subTest(raw=raw[:6]), self.assertRaises(ValueError):
+                self.formats.zstd_dictionaries(raw)
+
     def test_a_replacement_keeps_the_dictionary_and_declares_its_size(self):
         data = b'stand-in pack ' * 200
         for dictionary_id in (1, 3):

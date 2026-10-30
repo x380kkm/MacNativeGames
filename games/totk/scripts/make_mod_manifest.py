@@ -89,6 +89,8 @@ Manifest.__doc__ = """The manifest of one mod folder.
 def read_index(path):
     """RomFS path -> (offset, size) from runtime-index.bin (scripts/prepare_romfs_backend.py writes it)."""
     data = path.read_bytes()
+    if len(data) < 24:
+        raise ValueError(f'{path}: not a RomFS index')
     magic, count, strings = struct.unpack_from('<8sQQ', data, 0)
     if magic != b'TOTKRFS1' or strings != 24 + count*24 or strings > len(data):
         raise ValueError(f'{path}: not a RomFS index')
