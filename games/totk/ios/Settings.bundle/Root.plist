@@ -466,6 +466,80 @@
 			<key>DefaultValue</key>
 			<false/>
 		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+			<key>Title</key>
+			<string>图形排查 · Graphics troubleshooting</string>
+			<key>FooterText</key>
+			<string>一般保持默认。画面或启动出问题时，逐项设为“关”来比较。遮挡查询保护：无法确认的遮挡结果按可见处理，最多多画被挡住的物体。同图双槽：同一张图挂在两个颜色槽时，只写回绘制过的那一个。未对齐内存池：系统无法建立别名的内存池仍然有效，不让启动时的内存映射失败。重新启动游戏后生效 · Leave these at Default. If the picture or the game's start goes wrong, set them to Off one at a time to compare. Occlusion guard: an occlusion result that cannot be vouched for reads visible, so at worst a hidden object is drawn. One image at two colour slots: only the slot that was drawn is stored. Unaligned memory pool: a pool the system cannot alias stays valid, so the memory mapping at the game's start does not fail. Takes effect after relaunching the game</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSMultiValueSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_OCCL_GUARD</string>
+			<key>TOTKApp</key>
+			<string>totk</string>
+			<key>Title</key>
+			<string>遮挡查询保护 · Occlusion guard</string>
+			<key>DefaultValue</key>
+			<string></string>
+			<key>Values</key>
+			<array>
+				<string></string>
+				<string>0</string>
+			</array>
+			<key>Titles</key>
+			<array>
+				<string>默认（开）· Default (on)</string>
+				<string>关 · Off</string>
+			</array>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSMultiValueSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_RT_DUP</string>
+			<key>TOTKApp</key>
+			<string>totk</string>
+			<key>Title</key>
+			<string>同图双槽 · One image at two colour slots</string>
+			<key>DefaultValue</key>
+			<string></string>
+			<key>Values</key>
+			<array>
+				<string></string>
+				<string>0</string>
+			</array>
+			<key>Titles</key>
+			<array>
+				<string>默认（开）· Default (on)</string>
+				<string>关 · Off</string>
+			</array>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSMultiValueSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_VPOOL_UNALIGNED</string>
+			<key>TOTKApp</key>
+			<string>totk</string>
+			<key>Title</key>
+			<string>未对齐内存池 · Unaligned memory pool</string>
+			<key>DefaultValue</key>
+			<string></string>
+			<key>Values</key>
+			<array>
+				<string></string>
+				<string>0</string>
+			</array>
+			<key>Titles</key>
+			<array>
+				<string>默认（开）· Default (on)</string>
+				<string>关 · Off</string>
+			</array>
+		</dict>
 	</array>
 </dict>
 </plist>

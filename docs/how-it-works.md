@@ -159,7 +159,8 @@ the physical pool does not reach the virtual view, so it is the alias alone that
 pool is not known. The log says what is missing in red lines: one for the pool with its flags and size, and one for each
 request not mapped with its offsets and size (the first 8).
 
-`TOTK_VPOOL_UNALIGNED=0` refuses such a pool again, which fails its initialization and the whole mapping call;
+`TOTK_VPOOL_UNALIGNED=0` refuses such a pool again, which fails its initialization and the whole mapping call. On iPhone and
+iPad, Settings › Apps › Tears of the Kingdom › Graphics troubleshooting › Unaligned memory pool › Off sets it.
 `TOTK_VPOOL_UNALIGNED=1` turns the new behaviour on on the Mac, where the default stays as it was.
 
 ## One image at two colour slots
@@ -176,8 +177,9 @@ other copy is stored as DontCare. Pipelines, the archive and the warm-up are unt
 which one is stored is known only at the end of the pass, and a draw that samples such an image stores the pass first
 instead of reading the tile. A write through the slot that is not stored is lost, as it is in the Breath of the Wild build.
 
-`TOTK_RT_DUP=0` turns this off and `TOTK_RT_DUP=1` turns it on on the Mac. Apple's Mac GPUs are tile-based too, so the rule
-holds there, but the Mac default stays off until it has been compared on one.
+`TOTK_RT_DUP=0` turns this off; on iPhone and iPad, Settings › Apps › Tears of the Kingdom › Graphics troubleshooting › One
+image at two colour slots › Off sets it. `TOTK_RT_DUP=1` turns it on on the Mac. Apple's Mac GPUs are tile-based too, so the
+rule holds there, but the Mac default stays off until it has been compared on one.
 
 ## Occlusion queries
 
@@ -203,9 +205,10 @@ zero or non-zero, and a light it scales by the count stays dark. Two kinds of re
 Zeros elsewhere are trusted, so a false zero there is not caught: the same run has stretches of 11 queries per frame with
 10 at 0 and no frame of nothing but zeros, and the log cannot say whether those zeros are true either.
 
-`TOTK_OCCL_GUARD=0` turns this off, and `TOTK_OCCL_GUARD=1` turns it on on the Mac, where it is off by default. A draw held
-back while its shader is prepared raises its report on every platform, whatever the switch says. The `[occl]` line in the
-log counts what was measured ("with all of them 0") and both kinds of raised report ("raised to 1", "guard raised").
+`TOTK_OCCL_GUARD=0` turns this off; on iPhone and iPad, Settings › Apps › Tears of the Kingdom › Graphics troubleshooting ›
+Occlusion guard › Off sets it. `TOTK_OCCL_GUARD=1` turns it on on the Mac, where it is off by default. A draw held back while
+its shader is prepared raises its report on every platform, whatever the switch says. The `[occl]` line in the log counts
+what was measured ("with all of them 0") and both kinds of raised report ("raised to 1", "guard raised").
 
 ## The build (build_app.py)
 
