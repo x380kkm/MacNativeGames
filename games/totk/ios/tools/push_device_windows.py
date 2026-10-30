@@ -4,10 +4,12 @@ pymobiledevice3, as install_device.py does on a Mac with Xcode's devicectl. The 
 with iTunes or Apple Devices installed, for its usbmuxd) and unlocked; the app is signed already (package_ipa_windows.py).
 
   python push_device_windows.py deploy <name>.ipa --romfs <work>/totk/extracted/v143/romfs/romfs.bin --backup-to <dir>
-         [--seed <name>-shader-seed] [--no-backup]
+         [--seed <name>-shader-seed] [--no-backup] [--mod <mod folder> [--version v143]]
   python push_device_windows.py install <name>.ipa
   python push_device_windows.py romfs <romfs.bin> --bundle-id <id>        the 17 GB image into Documents/GameData
   python push_device_windows.py seed <name>-shader-seed --bundle-id <id>  the startup shaders into Documents/GameData
+  python push_device_windows.py push-mod <mod folder> --bundle-id <id> [--version v143]   a RomFS mod into Documents/mods
+  python push_device_windows.py remove-mod --bundle-id <id> [--version v143]
   python push_device_windows.py backup-save --to <dir> --bundle-id <id>   Documents/save, with account.uid
   python push_device_windows.py restore-save <backup folder> --bundle-id <id> [--safety-to <dir>] [--other-app]
   python push_device_windows.py status --bundle-id <id>
@@ -30,10 +32,18 @@ size. The shaders as one stream, <folder>.pack.000, ... (main.m seed_unpack, ins
 shader-seed.txt says "stale" and before it says "<folder>\\n<fingerprint>"; the app unpacks it on its next start. A
 marker is written to a temporary name and renamed, so the app never reads half of one.
 
+A player's RomFS mod (scripts/make_button_icons.py, make_mod_manifest.py) goes into Documents/mods/<version> (v143 for
+1.4.3, runtime/game_version.h TOTK_GAME_DIR), which main.m hands to the runtime when it holds a manifest.tsv. push-mod
+checks each line of the folder's manifest.tsv and each file it lists (size and SHA-256) as runtime/romfs.c does at start,
+and copies only those files. The device's manifest.tsv goes first and comes back last, so the app never loads a mod
+whose files are still being copied; until then manifest.tsv.copying holds the new manifest. A copy that stopped goes on
+from the files at their full size; any other copy first empties the folder, so a file at its full size is one this
+copy wrote. remove-mod removes the folder, manifest.tsv first.
+
 The device side is app_container.py (pymobiledevice3's house_arrest, AFC and installation_proxy). pymobiledevice3 (a pipx
 or uv tool) has its own Python: the commands that reach the device start this script again in that interpreter
 ($TOTK_PMD3_PYTHON, or the one `uv tool dir` or pipx keeps it in)."""
-import argparse, hashlib, json, subprocess, sys, tempfile, time, zipfile
+import argparse, hashlib, json, re, subprocess, sys, tempfile, time, zipfile
 from pathlib import Path
 
 TOOLS = Path(__file__).resolve().parent
@@ -44,6 +54,12 @@ from app_container import ipa_info   # noqa: E402
 
 GAMEDATA = 'Documents/GameData'
 SAVE = 'Documents/save'
+MODS = 'Documents/mods'
+MOD_VERSIONS = ('v0', 'v112', 'v121', 'v143', 'botw160', 'botw190')   # TOTK_GAME_DIR of each build (runtime/game_version.h)
+MOD_VERSION = 'v143'   # the version package_ipa_windows.py packages
+COPYING = 'manifest.tsv.copying'   # the manifest of a mod copy that has not finished; the app reads manifest.tsv only
+# A manifest line as runtime/romfs.c overlay_load reads it: path, size, SHA-256, the original's SHA-256 or "-" for an added file.
+MANIFEST_LINE = re.compile(r'([^\t\n]{1,4095})\t(\d+)\t([0-9a-f]{64})\t([0-9a-f]{64}|-)(?![0-9a-f-])')
 PART = install_device.PART
 
 
@@ -144,6 +160,95 @@ def remote_files(box, rel, prefix=''):
     return out
 
 
+def remove_below(box, rel):
+    """Every file and folder below rel on the device, each folder after what it held; rel itself stays."""
+    for name, (_, folder) in sorted((box.listdir(rel) or {}).items()):
+        if folder:
+            remove_below(box, f'{rel}/{name}')
+        box.remove(f'{rel}/{name}')
+
+
+def romfs_path_ok(path):
+    """runtime/romfs_path.h romfs_path_valid_relative: relative, parts between '/', none empty, '.' or '..', no '\\'."""
+    return bool(path) and not path.startswith('/') and '\\' not in path and all(p not in ('', '.', '..') for p in path.split('/'))
+
+
+def mod_files(folder):
+    """The files a mod folder's manifest.tsv lists, [(RomFS path, size)], each checked as runtime/romfs.c checks it at
+    start (a line it reads, a RomFS path, the file's size and SHA-256), and the manifest's bytes. The originals' SHA-256
+    are checked against the device's RomFS by the game itself."""
+    manifest = folder/'manifest.tsv'
+    require(manifest.is_file(), f'{manifest} not found: make_button_icons.py or make_mod_manifest.py writes it')
+    text = manifest.read_bytes()
+    files = []
+    for n, line in enumerate(text.decode('utf-8').split('\n'), 1):
+        if not line or line.startswith('#'):   # romfs.c skips comment and empty lines
+            continue
+        m = MANIFEST_LINE.match(line)
+        require(m, f'{manifest} line {n}: not a line runtime/romfs.c reads (path, size, SHA-256, original SHA-256), '
+                'so the game would stop at start')
+        path, size, sha = m.group(1), int(m.group(2)), m.group(3)
+        require(romfs_path_ok(path), f'{manifest} line {n}: {path!r} is not a RomFS path')
+        file = folder/path
+        require(file.is_file() and file.stat().st_size == size, f'{file}: missing, or not the {size} bytes manifest.tsv says')
+        with file.open('rb') as f:
+            require(hashlib.file_digest(f, 'sha256').hexdigest() == sha, f'{file}: not the SHA-256 manifest.tsv says')
+        files.append((path, size))
+    require(files, f'{manifest} lists no file')
+    paths = [p for p, _ in files]
+    twice = next((p for p in paths if paths.count(p) > 1), None)
+    require(twice is None, f'{manifest} lists {twice} twice, so the game would stop at start')
+    return files, text
+
+
+def push_mod(box, folder, version=MOD_VERSION, log=print, progress=None):
+    """A mod folder's files (mod_files) into Documents/mods/<version>, manifest.tsv last. Returns what was done."""
+    files, text = mod_files(folder)
+    rel = f'{MODS}/{version}'
+    box.makedirs(rel)
+    have = dict(remote_files(box, rel))
+    if box.read(f'{rel}/manifest.tsv') == text and all(have.get(p) == s for p, s in files):
+        log(f'mod: the device already has this one in {rel}'); return 'present'
+    resume = box.read(f'{rel}/{COPYING}') == text
+    if 'manifest.tsv' in have:
+        box.remove(f'{rel}/manifest.tsv')   # the app loads no mod from here until the copy is complete
+    if not resume:   # an earlier mod's files go first: a file at its full size is then one this copy wrote
+        remove_below(box, rel)
+        require(box.listdir(rel) == {}, f'{rel} on the device could not be emptied; remove it in the Files app and run this again')
+        box.write(f'{rel}/{COPYING}', text)
+    total = sum(s for _, s in files)
+    log(f'mod: copying {len(files)} files, {total / 2**20:.1f} MiB, into {rel}' + (', going on from the files already there' if resume else ''))
+    show, done, shown = progress and progress(total, 'mod'), 0, [0]
+    def report(n):   # one progress line over all files
+        shown[0] = n; show(n)
+    for path, size in files:
+        if not (resume and have.get(path) == size):
+            box.makedirs(f'{rel}/{path}'.rsplit('/', 1)[0])
+            box.upload(f'{rel}/{path}', folder/path, 0, None, show and (lambda d, at=done: report(at + d)))
+        done += size
+    if show and shown[0] < total:   # the last files were there already: the line still ends
+        show(total)
+    now = dict(remote_files(box, rel))
+    wrong = [p for p, s in files if now.get(p) != s]
+    require(not wrong, f'files with the wrong size on the device after copying: {wrong[:5]}; run this again')
+    box.write(f'{rel}/manifest.tsv', text)   # the next start loads the mod
+    box.remove(f'{rel}/{COPYING}')
+    return 'copied'
+
+
+def remove_mod(box, version=MOD_VERSION, log=print):
+    """Documents/mods/<version> off the device, manifest.tsv first. Returns what was done."""
+    rel = f'{MODS}/{version}'
+    have = box.listdir(rel)
+    if have is None:
+        log(f'mod: none on the device ({rel})'); return 'none'
+    if 'manifest.tsv' in have:
+        box.remove(f'{rel}/manifest.tsv')   # the app loads no mod from here even if the rest stops
+    remove_below(box, rel); box.remove(rel)
+    require(box.listdir(rel) is None, f'{rel} is still on the device; remove it in the Files app')
+    log(f'mod: {rel} removed; the next start plays without it'); return 'removed'
+
+
 def account_folder(uid):
     """save/save/<name> of an account.uid (16 bytes: lo, hi, little-endian; fs_host.c prints hi then lo)."""
     require(len(uid) == 16, f'account.uid is {len(uid)} bytes, not 16')
@@ -206,12 +311,19 @@ def status(box, log=print):
     seed = (box.read(f'{GAMEDATA}/shader-seed.txt') or b'-').decode(errors='replace').strip().replace('\n', ' ')
     log(f'GameData: {len(parts)} image parts, {sum(have[n][0] for n in parts) / 2**30:.2f} GiB; romfs.sha256: {marker}')
     log(f'shader-seed.txt: {seed}')
+    for name, (_, folder) in sorted((box.listdir(MODS) or {}).items()):
+        if folder:
+            lines = (box.read(f'{MODS}/{name}/manifest.tsv') or b'').decode(errors='replace').split('\n')
+            listed = sum(1 for line in lines if line and not line.startswith('#'))
+            log(f'mods/{name}: ' + (f'{listed} files in manifest.tsv' if listed else 'no manifest.tsv, so the app does not load it'))
     uid = box.read(f'{SAVE}/account.uid')
     log(f'saves: {len(remote_files(box, SAVE))} files' + (f', account {account_folder(uid)}' if uid else ', no account.uid'))
 
 
 def deploy_app(box, a, ipa, info):
-    """Back up the saves, install, then the image and the shaders the app does not carry."""
+    """Back up the saves, install, then the image and the shaders the app does not carry, and --mod last."""
+    if a.mod:
+        mod_files(a.mod)   # a mod the game would refuse stops here, before the long steps
     if box.installed():
         if not a.no_backup:
             require(a.backup_to, 'the app is installed: give --backup-to <folder> for its saves (or --no-backup)')
@@ -233,6 +345,8 @@ def deploy_app(box, a, ipa, info):
             push_seed(box, seed, progress=bar)
         else:
             print(f'shaders: no {seed.name} beside the IPA and none in the app (package_ipa_windows.py --seed)', flush=True)
+    if a.mod:
+        push_mod(box, a.mod, a.version, progress=bar)
     print('done. A first start after new shaders unpacks them on screen.', flush=True)
 
 
@@ -251,9 +365,16 @@ def arguments():
     deploy.add_argument('--seed', type=Path, help='the device seed (default: <ipa name>-shader-seed beside the IPA)')
     deploy.add_argument('--backup-to', type=Path, help='where the saves of the installed app are backed up first')
     deploy.add_argument('--no-backup', action='store_true', help='install without backing up the saves')
+    def mod_version(c):
+        c.add_argument('--version', choices=MOD_VERSIONS, default=MOD_VERSION,
+                       help=f'the game version of the app, the folder below {MODS} (default: {MOD_VERSION})')
+    deploy.add_argument('--mod', type=Path, help=f'a RomFS mod folder with its manifest.tsv, copied into {MODS}/<version> last')
+    mod_version(deploy)
     command('install', 'ipa')
     command('romfs', 'image')
     command('seed', 'folder')
+    mod_version(command('push-mod', 'folder'))
+    mod_version(command('remove-mod'))
     command('backup-save').add_argument('--to', type=Path, required=True)
     restore = command('restore-save', 'backup')
     restore.add_argument('--safety-to', type=Path, help='where the device\'s saves are backed up first (default: beside the backup)')
@@ -289,6 +410,10 @@ def main():
             push_romfs(box, a.image, progress=bar)
         elif a.command == 'seed':
             push_seed(box, a.folder, progress=bar)
+        elif a.command == 'push-mod':
+            push_mod(box, a.folder, a.version, progress=bar)
+        elif a.command == 'remove-mod':
+            remove_mod(box, a.version)
         elif a.command == 'backup-save':
             backup_save(box, a.to)
         elif a.command == 'restore-save':

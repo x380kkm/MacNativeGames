@@ -495,6 +495,16 @@ static void apply_settings(void) {
     if (lang.length>0&&lang.length<8) setenv("TOTK_LANG",lang.UTF8String,0);
     setenv("TOTK_ROMFS_PATCHES",[res stringByAppendingPathComponent:@"romfs-patches"].fileSystemRepresentation,1);
     setenv("TOTK_ROMFS_PATCHES_OUT",[res stringByAppendingPathComponent:@"romfs-patches-out"].fileSystemRepresentation,1);
+    /* Player mods (runtime/romfs.c), in the folder the Mac launcher uses below its data folder (app/launcher.m):
+       Documents/mods/<version> (TOTK_GAME_DIR, v143 for 1.4.3), when it holds a manifest.tsv (scripts/make_mod_manifest.py
+       and make_button_icons.py write one; ios/tools/push_device_windows.py push-mod copies a mod folder there).
+       overwrite=0 keeps a devicectl TOTK_ROMFS_MODS winning ("0" loads none). */
+    NSString *mods = [docs stringByAppendingPathComponent:@"mods/" TOTK_GAME_DIR];
+    if ([fm fileExistsAtPath:[mods stringByAppendingPathComponent:@"manifest.tsv"]]) setenv("TOTK_ROMFS_MODS",mods.fileSystemRepresentation,0);
+    const char *modsUsed = getenv("TOTK_ROMFS_MODS");
+    if (modsUsed && *modsUsed && strcmp(modsUsed,"0")) fprintf(stderr,"[totk] player mods: %s\n",modsUsed);
+    else if (modsUsed) fprintf(stderr,"[totk] player mods: none (TOTK_ROMFS_MODS=%s)\n",modsUsed);
+    else fprintf(stderr,"[totk] player mods: none (no %s/manifest.tsv)\n",mods.fileSystemRepresentation);
     setenv("TOTK_SHARED_FONTS",[res stringByAppendingPathComponent:@"shared-fonts"].fileSystemRepresentation,1);
     NSString *aoc = [res stringByAppendingPathComponent:@"aoc"];   // Breath of the Wild's add-on content packs (build_ipa.py; runtime/aoc_romfs.c)
     if ([fm fileExistsAtPath:aoc]) setenv("TOTK_AOC",aoc.fileSystemRepresentation,1);

@@ -4,7 +4,8 @@
 
 Both offer the same methods on paths inside the container ('Documents/...'): listdir ({name: (size, is folder)}, None for
 a missing folder), read (None for a missing file), write (to a temporary name, then renamed, so the app never reads half
-of a marker), upload (a range of a local file, CHUNK bytes at a time), download, makedirs, remove, installed (the
+of a marker), upload (a range of a local file, CHUNK bytes at a time), download, makedirs, remove (a file, or a folder
+that is empty; a failure is not reported, so callers list the folder again), installed (the
 installed app's Info.plist keys, None when it is not installed), install (an IPA; an installed app of the same identifier
 is replaced and keeps its data container) and close.
 
@@ -88,7 +89,14 @@ class LocalContainer:
         (self.root/rel).mkdir(parents=True, exist_ok=True)
 
     def remove(self, rel):
-        (self.root/rel).unlink(missing_ok=True)
+        path = self.root/rel
+        if not path.is_dir():
+            path.unlink(missing_ok=True)
+            return
+        try:   # a folder only when it is empty, and without an error otherwise, as rm_single(force=True) on the device
+            path.rmdir()
+        except OSError:
+            pass
 
     def installed(self):
         record = self.root/'.installed.json'

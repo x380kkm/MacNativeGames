@@ -282,6 +282,46 @@ python games/totk/ios/tools/push_device_windows.py deploy <目录>/TOTK.ipa --ro
 - **旧的着色器缓存：** 每次启动时，App 都会在后台删掉 `Documents/shader-cache` 里其他翻译链的文件夹（30a1b93 打的 App 用的是 `totk-native-v6-unverified` 链）和 `Documents/GameData` 里以前推送的着色器文件夹；打开日志时会写 `[shader-cache] removed N entries of earlier translation chains`。
 - 像 30a1b93 那样把 RomFS 打进 App 的旧版，被替换时镜像随它一起去掉；新 App 从 `Documents/GameData` 读取镜像，所以第一次 `deploy` 要加 `--romfs`。
 
+### 手柄按键图标（Windows）
+
+游戏的按键提示画的是 Switch 的按键。任天堂以外的手柄按位置映射：右边的键是 Switch 的 A，下边是 B，上边是 X，左边是 Y。所以用 Xbox 手柄时，提示里的字母和要按的那个键上印的字母不一样。RomFS mod 可以在提示里改画手柄自己的按键。它只改图，哪个键做什么不变。
+
+App 从自己的 `Documents/mods/v143` 读取这样的 mod（`ios/Sources/main.m`；`v143` 是 1.4.3 的文件夹）。运行时所在的提交里还没有这项改动（`push_device_windows.py` 没有 `push-mod` 命令）的 App 不读这个文件夹：重新构建运行时（第 4 步）再打包（第 5 步）。打开日志时，读这个文件夹的 App 启动时会写 `[totk] player mods: <文件夹>`，或 `[totk] player mods: none (…)`。
+
+**1. 带 fontTools 的 Python**，只做一次。uv 的缓存里有 fontTools 时，`uv` 从缓存安装，不用下载（`--offline`；去掉它就联网下载）：
+
+```powershell
+uv venv --python 3.14 <工作目录>/tools/icons-venv
+uv pip install --offline --python <工作目录>/tools/icons-venv/Scripts/python.exe fonttools
+```
+
+**2. 做 mod**，用第 1 步还原的 RomFS，放到仓库以外的文件夹：
+
+```powershell
+<工作目录>/tools/icons-venv/Scripts/python.exe games/totk/scripts/make_button_icons.py <工作目录>/mods/v143-xbox --romfs <工作目录>/totk/extracted/v143/romfs --style xbox
+```
+
+- `--style xbox` 在 Switch 的 A、B、X、Y 图标里画 B A Y X：按位置映射时触发它们的那几个键上印的字母。它还画 LB/RB、LT/RT、Menu 和 View、十字键和 LS，提示和 HUD 的按键指引都改，所有游戏语言都改。
+- `--faces` 为 Switch 的 A、B、X、Y 图标依次指定别的键，用 Xbox 手柄印在键上的字母表示。游戏之前有东西对调了按键时用它：手柄自己的配置（例如 Elite 手柄的配置），或 iPadOS“设置 › 通用 › 游戏控制器”里的自定。确定字母的办法：在提示出现时逐个按键，记下每个键响应哪个提示，`--faces` 依次写出响应 A、B、X、Y 的那几个键上印的字母。例如印 B 的键响应 A，印 A 的键响应 B，X 和 Y 各自响应同字母的提示，就用 `--style xbox --faces BAXY`。不加 `--faces` 时画样式自己的顺序（`xbox` 是 BAYX）。PlayStation 样式也接受 `--faces`，画同一个键的符号（A 叉、B 圆、X 方、Y 三角）。
+- `--romfs` 给 `romfs.bin` 所在的文件夹，也可以直接给 `romfs.bin`。旁边构建自己的覆盖文件夹 `extracted/v143/romfs-patches` 也替换 HUD 的布局归档：App 在 `GameData/romfs-patches` 里带着同样的文件，所以脚本把 mod 的归档和这份覆盖的修改合并。不合并的话，两个覆盖替换同一个文件，游戏启动时就会停下。
+- 脚本写出 `manifest.tsv`（每个文件的大小和 SHA-256，以及原文件的 SHA-256，游戏启动时核对）。布局归档旁边保留 `<归档>.mod-original`，即合并前 mod 自己的归档；设备上用不到它。加 `--replace` 会覆盖上次运行写出的文件，换样式或换顺序就这样做。
+- 用固定图片画的提示（部分教程动画）仍是 Switch 图标。
+- 这个文件夹里的文件是用游戏自己的文件（字体和布局）做出来的：只留在自己的电脑上，不要提交，也不要上传。
+
+在实际运行的电脑上（2026-10-30），`--style xbox --faces BAXY` 用了 33 秒，写出 6 个文件，共 44 MiB。运行时的覆盖代码（`games/totk/runtime/romfs.c`）用 Visual Studio 的 clang 在 Windows 上编译后，以还原的 RomFS 叠在构建的覆盖之上接受了这个 mod。还没有在设备上试过。
+
+**3. 复制到设备：**
+
+```powershell
+python games/totk/ios/tools/push_device_windows.py push-mod <工作目录>/mods/v143-xbox --bundle-id <id>
+```
+
+`push-mod` 先像游戏启动时那样，按大小和 SHA-256 核对 `manifest.tsv` 列出的每个文件。然后把这些文件复制到 `Documents/mods/v143`，`manifest.tsv` 最后复制，所以游戏不会加载复制了一半的 mod。复制中断后再运行，会接着已有的文件继续。`deploy … --mod <文件夹>` 在安装之后做同样的事。`status` 列出 `Documents/mods` 里的文件夹。游戏下次启动时加载 mod。`--version` 指定别的版本的文件夹（默认 `v143`）。
+
+**删除：** `push_device_windows.py remove-mod --bundle-id <id>` 删掉 `Documents/mods/v143`，先删 `manifest.tsv`；下次启动就是 Switch 图标。在“文件”App 里删掉 `mods` 文件夹（我的 iPad › Tears of the Kingdom）效果一样。
+
+`push-mod` 和 `remove-mod` 目前只用 `--simulate` 演练过（2026-10-30）。
+
 ## Apple Vision Pro
 
 只支持王国之泪，16:9 窗口内用手柄游玩。

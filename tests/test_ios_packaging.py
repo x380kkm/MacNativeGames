@@ -157,6 +157,28 @@ class FullHD(unittest.TestCase):
 
 
 
+class PlayerMods(unittest.TestCase):
+    """ios/Sources/main.m hands Documents/mods/<version> to the runtime (runtime/romfs.c TOTK_ROMFS_MODS) when it holds a
+    manifest.tsv: the folder name the Mac launcher uses below its data folder, and the one push_device_windows.py
+    push-mod fills (2026-10-30)."""
+    def test_the_app_and_the_push_tool_name_the_same_folder(self):
+        import re
+        import push_device_windows
+        game = TOOLS.parents[1]
+        main = (TOOLS.parent/'Sources/main.m').read_text(encoding='utf-8')
+        self.assertIn('NSString *mods = [docs stringByAppendingPathComponent:@"mods/" TOTK_GAME_DIR];', main)
+        self.assertIn('if ([fm fileExistsAtPath:[mods stringByAppendingPathComponent:@"manifest.tsv"]]) '
+                      'setenv("TOTK_ROMFS_MODS",mods.fileSystemRepresentation,0);', main)   # 0: a devicectl value wins
+        self.assertEqual(main.count('setenv("TOTK_ROMFS_MODS"'), 1)
+        self.assertLess(main.index('setenv("TOTK_ROMFS_MODS"'), main.index('host_argv[0] = strdup'))   # before the game starts
+        self.assertIn('"[totk] player mods: %s\\n"', main)
+        self.assertIn('@"mods/" TOTK_GAME_DIR', (game/'app/launcher.m').read_text(encoding='utf-8'))
+        dirs = set(re.findall(r'#define TOTK_GAME_DIR "(\w+)"', (game/'runtime/game_version.h').read_text(encoding='utf-8')))
+        self.assertEqual(set(push_device_windows.MOD_VERSIONS), dirs)
+        self.assertIn(push_device_windows.MOD_VERSION, dirs)
+        self.assertEqual(push_device_windows.MODS, 'Documents/mods')
+
+
 class StartScreen(unittest.TestCase):
     """The start screen (ios/Sources/start_screen.m): the game starts from its button, the picture and frame rate are
     applied then (apply_display_settings in main.m), the picture row only where the Settings pane has Full HD."""

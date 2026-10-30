@@ -25,6 +25,12 @@ Styles:
             L R = L1 R1, ZL ZR = L2 R2, + - = Options and Create, the d-pad as a cross.
   playstation-label  the same, but A B X Y = Cross Circle Square Triangle, for TOTK_FACE_BUTTONS=label or a
             controls.txt with south = a, east = b, west = x, north = y.
+--faces (xbox, playstation and playstation-label) names the four buttons drawn in the Switch A, B, X and Y icons, in that
+order, by the Xbox letters GameController names them with (A at the bottom, B on the right, X on the left, Y at the top);
+PlayStation styles draw the symbol of the same button (A Cross, B Circle, X Square, Y Triangle). The default is the
+style's own (FACES: BAYX for xbox and playstation, ABXY for playstation-label). It is for a controller that reaches the
+game with buttons already swapped, by its own profile or the system's controller settings: --style xbox --faces BAXY
+draws the Xbox letters for a controller whose X and Y arrive swapped (the button printed X plays Switch X).
 The button guide in play is not drawn with this font but from eight textures of the common layout archive (A B X Y, L,
 ZL and two left-stick keys); they are redrawn from the same icons (HUD_TEXTURES). Other prompts drawn as fixed images
 (some tutorial animations) keep the Switch icons.
@@ -42,7 +48,11 @@ mod with each archive's entry at least the original entry plus what the archive 
 Needs fontTools (python3.14 -m pip install fonttools) and Python 3.14 (compression.zstd). An existing font archive in the mod
 folder (another mod's, or an earlier run) is only overwritten with --replace. The xbox style matches the default face-button
 mapping by position (not TOTK_FACE_BUTTONS=label or face buttons changed in controls.txt).
-usage: make_button_icons.py <mod folder> (--app <Tears of the Kingdom.app> | --romfs <folder>) [--version v121] [--style xbox] [--replace]
+--romfs names the RomFS folder (romfs.bin and runtime-index.bin, or its romfs.bin) instead of an app: a build work folder's
+or recover_ipa.py's extracted/<version>/romfs. The build's own overlay is then the romfs-patches folder beside it, the
+one build_ipa.py and package_ipa_windows.py put into an iPhone/iPad app (GameData/romfs-patches); this needs no macOS tool.
+usage: make_button_icons.py <mod folder> (--app <Tears of the Kingdom.app> | --romfs <folder | romfs.bin>) [--version v121]
+                            [--style xbox] [--faces BAXY] [--replace]
 """
 import argparse
 import io
@@ -287,7 +297,24 @@ def stick(g, label, up=False, advance=640):
     return advance, draw
 
 
-def xbox_style(g):
+# The face buttons by the letters GameController names them with, the Xbox labels: A at the bottom, B on the right, X on
+# the left, Y at the top. FACES: the buttons a controller style draws in the Switch A, B, X and Y icons (U+E040 to U+E043)
+# unless --faces names others.
+FACE_LETTERS = 'ABXY'
+PLAYSTATION_SYMBOLS = {'A': 'cross', 'B': 'circle', 'X': 'square', 'Y': 'triangle'}   # the same buttons on a DualSense
+FACES = {'xbox': 'BAYX', 'playstation': 'BAYX', 'playstation-label': 'ABXY'}
+
+
+def parse_faces(text):
+    """--faces: four letters for the Switch A, B, X and Y icons in that order, each of A B X Y once (case ignored)."""
+    faces = text.upper()
+    if len(faces) != 4 or sorted(faces) != sorted(FACE_LETTERS):
+        raise argparse.ArgumentTypeError(f'{text!r}: give each of A, B, X and Y once, the buttons for the Switch A, B, X '
+                                         'and Y icons in that order (for example BAYX)')
+    return faces
+
+
+def xbox_style(g, faces=FACES['xbox']):
     def face(letter, advance=640):
         def draw(pen):
             circle(pen, advance / 2, CY, R); g.hole(pen, letter, advance / 2, CY, R * 0.95, R * 1.3)
@@ -326,8 +353,9 @@ def xbox_style(g):
             for d in lit:
                 polygon(pen, heads[d])   # already clockwise: a hole
         return advance, draw
+    a, b, x, y = faces
     return {
-        0xE040: face('B'), 0xE041: face('A'), 0xE042: face('Y'), 0xE043: face('X'),
+        0xE040: face(a), 0xE041: face(b), 0xE042: face(x), 0xE043: face(y),
         0xE044: bumper('LB'), 0xE045: bumper('RB'), 0xE046: trigger('LT'), 0xE047: trigger('RT'),
         0xE04B: menu(), 0xE04C: view(),
         0xE049: dpad('up', 'down', 'left', 'right'), 0xE060: dpad('up'), 0xE061: dpad('down'),
@@ -342,9 +370,11 @@ def oriented(pen, points, hole):
     polygon(pen, points if (area > 0) != hole else points[::-1])
 
 
-def playstation_style(g, by_label=False):
-    """DualSense / DualShock symbols. By position (the default mapping): A B X Y = Circle Cross Triangle Square.
-    by_label (TOTK_FACE_BUTTONS=label, or controls.txt south = a, east = b, west = x, north = y): Cross Circle Square Triangle."""
+def playstation_style(g, faces=FACES['playstation']):
+    """DualSense / DualShock symbols. faces names the buttons of the Switch A, B, X and Y icons by their Xbox letters
+    (PLAYSTATION_SYMBOLS): by position (the default mapping) B A Y X = Circle Cross Triangle Square; by label
+    (playstation-label: TOTK_FACE_BUTTONS=label, or controls.txt south = a, east = b, west = x, north = y) A B X Y =
+    Cross Circle Square Triangle."""
     def face(symbol, advance=640):
         def draw(pen):
             cx, s = advance / 2, R * 0.50   # symbol half size
@@ -388,7 +418,7 @@ def playstation_style(g, by_label=False):
                 oriented(pen, [(cx + dx - 30, CY - 150), (cx + dx + 30, CY - 150), (cx + dx + 30, CY + 150), (cx + dx - 30, CY + 150)], hole=True)
         return advance, draw
     dpad_style = xbox_style(g)
-    a, b, x, y = ('cross', 'circle', 'square', 'triangle') if by_label else ('circle', 'cross', 'triangle', 'square')
+    a, b, x, y = (PLAYSTATION_SYMBOLS[letter] for letter in faces)
     icons = {
         0xE040: face(a), 0xE041: face(b), 0xE042: face(x), 0xE043: face(y),
         0xE044: bumper('L1'), 0xE045: bumper('R1'), 0xE046: trigger('L2'), 0xE047: trigger('R2'),
@@ -403,7 +433,12 @@ def playstation_style(g, by_label=False):
 AZERTY = str.maketrans('QWAZ', 'AZQW')   # US key position -> the letter an AZERTY keyboard prints there
 
 STYLES = {'keyboard': keyboard_style, 'azerty': lambda g: keyboard_style(g, AZERTY), 'xbox': xbox_style, 'playstation': playstation_style,
-          'playstation-label': lambda g: playstation_style(g, by_label=True)}
+          'playstation-label': lambda g, faces=FACES['playstation-label']: playstation_style(g, faces)}
+
+
+def style_icons(style, glyphs, faces=None):
+    """Code point -> (advance, draw) of `style`; faces (parse_faces), for a style of FACES, replaces its face buttons."""
+    return STYLES[style](glyphs) if faces is None else STYLES[style](glyphs, faces)
 
 
 # ---- the HUD's button guide: images, not glyphs ----
@@ -497,11 +532,11 @@ def redraw_hud(bntx, icons):
     return bytes(out)
 
 
-def redraw(otf, text_fonts, style):
+def redraw(otf, text_fonts, style, faces=None):
     font = TTFont(io.BytesIO(otf))
     cff = font['CFF '].cff; top = cff.topDictIndex[0]; charstrings = top.CharStrings; private = top.Private
     nominal = getattr(private, 'nominalWidthX', 0); cmap = font.getBestCmap()
-    icons = STYLES[style](Glyphs(text_fonts))
+    icons = style_icons(style, Glyphs(text_fonts), faces)
     for cp, (advance, draw) in icons.items():
         pen = T2CharStringPen(advance - nominal, None); draw(pen)
         charstrings[cmap[cp]] = pen.getCharString(private=private, globalSubrs=cff.GlobalSubrs)
@@ -527,15 +562,22 @@ def main():
     parser.add_argument('mod', type=Path, help='the mod folder to write into (other files in it are kept and listed too)')
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument('--app', type=Path, help='the built Tears of the Kingdom.app')
-    source.add_argument('--romfs', type=Path, help='a folder holding romfs.bin and runtime-index.bin')
+    source.add_argument('--romfs', type=Path, help='a folder holding romfs.bin and runtime-index.bin, or that romfs.bin '
+                        '(extracted/<version>/romfs; the build\'s overlay is the romfs-patches folder beside it)')
     parser.add_argument('--romfs-data', type=Path, help='the folder holding romfs.bin when it is not beside the index (an app '
                         'built with --mac-game-data library: <data>/GameData/<version>; with --app that folder is the default)')
     parser.add_argument('--version', choices=VERSIONS, help='the game version (default: the mod folder name)')
     parser.add_argument('--style', choices=sorted(STYLES), default='keyboard')
+    parser.add_argument('--faces', type=parse_faces, help='the buttons drawn in the Switch A, B, X and Y icons, in that '
+                        'order, by their Xbox letters (A bottom, B right, X left, Y top), each once, for a controller whose '
+                        'buttons reach the game swapped (default: the style\'s, ' +
+                        ', '.join(f'{f} for {s}' for s, f in FACES.items()) + ')')
     parser.add_argument('--replace', action='store_true', help='overwrite a font archive already in the mod folder')
     args = parser.parse_args()
+    if args.faces and args.style not in FACES:
+        parser.error(f'--faces goes with --style {", ".join(FACES)}, not {args.style}')
     version = args.version or (args.mod.name if args.mod.name in VERSIONS else None)
-    romfs = args.romfs
+    romfs = make_mod_manifest.romfs_folder(args.romfs) if args.romfs else None
     if args.app:
         if not version:
             parser.error('name the game version with --version (or name the mod folder v0, v112, v121 or v143)')
@@ -573,6 +615,7 @@ def main():
         layout_raw = read(layout)
 
     text_fonts, redrawn, growth = None, {}, {}
+    drawn = args.style + (f', faces {" ".join(args.faces)}' if args.faces else '')
     for path in archives:
         info = zstd.get_frame_info(raws[path]); dictionary = dictionaries[info.dictionary_id]
         archive = zstd.decompress(raws[path], zstd_dict=dictionary); assert len(archive) == info.decompressed_size
@@ -584,7 +627,7 @@ def main():
         otf, key = bfotf_decode(archive[slice(*members[FONT])])
         assert otf[:4] == b'OTTO', f'External.bfotf in {path} did not decode to an OpenType font'
         if otf not in redrawn:
-            redrawn[otf] = redraw(otf, text_fonts, args.style)
+            redrawn[otf] = redraw(otf, text_fonts, args.style, args.faces)
         new_otf, count = redrawn[otf]
         new_blob = bfotf_encode(new_otf, key); assert bfotf_decode(new_blob)[0] == new_otf
         new_archive = repack(archive, FONT, new_blob)
@@ -594,17 +637,17 @@ def main():
 
         growth[path] = len(new_archive) - len(archive)
         target = args.mod / path; target.parent.mkdir(parents=True, exist_ok=True); target.write_bytes(data)
-        print(f'{target}: {count} icons redrawn ({args.style}), {len(data)} bytes')
+        print(f'{target}: {count} icons redrawn ({drawn}), {len(data)} bytes')
 
     info = zstd.get_frame_info(layout_raw); dictionary = dictionaries[info.dictionary_id]
     archive = zstd.decompress(layout_raw, zstd_dict=dictionary); members = sarc_members(archive)
-    new_archive = repack(archive, BNTX, redraw_hud(archive[slice(*members[BNTX])], STYLES[args.style](Glyphs(text_fonts))))
+    new_archive = repack(archive, BNTX, redraw_hud(archive[slice(*members[BNTX])], style_icons(args.style, Glyphs(text_fonts), args.faces)))
     assert len(new_archive) == len(archive)
     data = zstd.compress(new_archive, level=19, zstd_dict=dictionary)
     assert zstd.decompress(data, zstd_dict=dictionary) == new_archive
     growth[layout] = 0
     target = args.mod / layout; target.parent.mkdir(parents=True, exist_ok=True); target.write_bytes(data)
-    print(f'{target}: {len(HUD_TEXTURES)} button guide textures redrawn ({args.style}), {len(data)} bytes')
+    print(f'{target}: {len(HUD_TEXTURES)} button guide textures redrawn ({drawn}), {len(data)} bytes')
 
     target = args.mod / restbl
     original = zstd.decompress(restbl_raw)
@@ -616,8 +659,12 @@ def main():
         merged, found = write_mod_manifest(args.mod, romfs, index)
     except ValueError as error:
         sys.exit(f'manifest not written: {error}')
+    overlay = make_mod_manifest.build_patches(romfs)[0]
+    if not (overlay / 'manifest.tsv').is_file():
+        print(f'{overlay / "manifest.tsv"} not found: no build overlay to merge with (an app whose overlay replaces one of '
+              'these files stops at start with this mod)')
     for name in merged:
-        print(f'{args.mod / name}: merged with the build\'s own patch of it')
+        print(f'{args.mod / name}: merged with the build\'s own patch of it ({overlay / name})')
     if found.misspelt:
         sys.exit('manifest not written: ' + ', '.join(f'{a} (the RomFS has {b})' for a, b in found.misspelt))
     print(f'{args.mod / "manifest.tsv"}: {len(found.lines)} files '

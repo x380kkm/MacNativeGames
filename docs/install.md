@@ -283,6 +283,46 @@ The saves are in the app's `Documents/save`: `account.uid` (16 bytes, the local 
 - **Old shader caches:** at every start the app removes, in the background, the folders of other translation chains in `Documents/shader-cache` (an app built at 30a1b93 used the chain `totk-native-v6-unverified`) and the earlier pushed shader folders in `Documents/GameData`; with the debug log on it writes `[shader-cache] removed N entries of earlier translation chains`.
 - An app built with the RomFS inside, as at 30a1b93, takes the image away when it is replaced; the new app reads it from `Documents/GameData`, which is why the first `deploy` needs `--romfs`.
 
+### Controller button icons, on Windows
+
+The game's prompts show the Switch's buttons. A controller other than Nintendo's is mapped by position: its right button plays Switch A, the bottom one B, the top one X and the left one Y. So on an Xbox controller the letter in a prompt is not the letter printed on the button to press. A RomFS mod can draw the controller's buttons in the prompts instead. It changes the pictures only: which button does what stays as it is.
+
+The app reads such a mod from its `Documents/mods/v143` (`ios/Sources/main.m`; `v143` is the folder of 1.4.3). An app whose runtime was built from a commit without this (one where `push_device_windows.py` has no `push-mod` command) ignores the folder: build the runtime again (step 4) and package (step 5). With the debug log on, an app that reads the folder writes `[totk] player mods: <folder>` at start, or `[totk] player mods: none (…)`.
+
+**1. A Python with fontTools,** once. `uv` installs it from its cache without a download when the cache has fontTools (`--offline`; leave that out to download it):
+
+```powershell
+uv venv --python 3.14 <work>/tools/icons-venv
+uv pip install --offline --python <work>/tools/icons-venv/Scripts/python.exe fonttools
+```
+
+**2. Make the mod** from the RomFS of step 1, into a folder outside the repository:
+
+```powershell
+<work>/tools/icons-venv/Scripts/python.exe games/totk/scripts/make_button_icons.py <work>/mods/v143-xbox --romfs <work>/totk/extracted/v143/romfs --style xbox
+```
+
+- `--style xbox` draws B A Y X in the Switch A, B, X and Y icons: the letters printed on the buttons that play them by position. It also draws LB/RB, LT/RT, Menu and View, the d-pad and LS, in the prompts and in the button guide of the HUD, in every game language.
+- `--faces` names other buttons for the Switch A, B, X and Y icons, in that order, by the letters an Xbox controller prints on them. Use it when something before the game swaps buttons: the controller's own profile (an Elite controller's, for example) or a customization in iPadOS Settings › General › Game Controller. To find the letters, press each button at a prompt and note which prompt it answers: `--faces` lists the printed letters of the buttons that answer A, B, X and Y. For example, when the button printed B answers A, the one printed A answers B, and X and Y answer the prompts of their own letters, use `--style xbox --faces BAXY`. Without `--faces` the style's own order is drawn (BAYX for `xbox`). The PlayStation styles take `--faces` too and draw the symbol of the same button (A Cross, B Circle, X Square, Y Triangle).
+- `--romfs` names the folder of `romfs.bin`, or `romfs.bin` itself. The build's own overlay, `extracted/v143/romfs-patches` beside it, also replaces the HUD's layout archive: the script merges the mod's archive with that overlay's edit, as the app carries the same files in `GameData/romfs-patches`. Without that merge the game stops at start, because two overlays would replace one file.
+- The script writes `manifest.tsv` (each file's size and SHA-256 and the original's SHA-256, which the game checks at start). Beside the layout archive it keeps `<archive>.mod-original`, the mod's archive before the merge; the device does not need it. With `--replace` it writes over the files of an earlier run, which is how to change the style or the order.
+- Prompts drawn as fixed images (some tutorial animations) keep the Switch icons.
+- The folder holds files made from the game's own (fonts and layouts): keep it on your PC, and never commit or upload it.
+
+On the PC this was tried on (2026-10-30), `--style xbox --faces BAXY` took 33 s and wrote six files, 44 MiB. The runtime's overlay code (`games/totk/runtime/romfs.c`), compiled on Windows with Visual Studio's clang, accepted the mod on top of the build's overlay with the recovered RomFS. It has not been tried on a device yet.
+
+**3. Copy it to the device:**
+
+```powershell
+python games/totk/ios/tools/push_device_windows.py push-mod <work>/mods/v143-xbox --bundle-id <id>
+```
+
+`push-mod` first checks each file `manifest.tsv` lists, by size and SHA-256, as the game does at start. It then copies those files into `Documents/mods/v143`, `manifest.tsv` last, so the game never loads a half-copied mod. A copy that stopped goes on from the files already there. `deploy … --mod <folder>` does the same after the install. `status` lists the folders in `Documents/mods`. The game loads the mod at its next start. `--version` names another version's folder (`v143` by default).
+
+**To remove it:** `push_device_windows.py remove-mod --bundle-id <id>` removes `Documents/mods/v143`, `manifest.tsv` first; the next start plays with the Switch icons. In the Files app, deleting the `mods` folder (On My iPad › Tears of the Kingdom) does the same.
+
+`push-mod` and `remove-mod` have been rehearsed with `--simulate` only (2026-10-30).
+
 ## Apple Vision Pro
 
 Tears of the Kingdom only, windowed 16:9 play with a controller. Install the visionOS platform in Xcode › Settings › Components, pair the headset with Xcode and turn on Developer Mode, then:

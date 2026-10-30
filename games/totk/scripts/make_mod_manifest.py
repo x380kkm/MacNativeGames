@@ -12,7 +12,8 @@ all of them at start, so a mod made for another game version stops the start ins
 is added (its original's SHA-256 is "-"), unless a RomFS path differs from it only in case: that is a misspelt
 replacement (paths are case-sensitive), so nothing is written. The originals come
 from the RomFS the app was built with: the app's Contents/Resources/totk/extracted/<version>/romfs (romfs.bin and
-runtime-index.bin), or a build work folder's extracted/<version>/romfs.
+runtime-index.bin), or a build work folder's extracted/<version>/romfs (--romfs; recover_ipa.py's for an app packaged
+on Windows). The manifest is UTF-8 with LF line ends on every system.
 
 A mod file the build's own RomFS overlay also replaces (extracted/<version>/romfs-patches, scripts/make_romfs_patches.py)
 would stop the start, since two overlays may not replace one file. Translations replace the UI archive
@@ -24,7 +25,7 @@ the build's patched members. The merged archive takes the mod file's place (the 
 original: runtime/romfs.c then lets it replace the build's overlay. Any other collision still stops the start. --check
 writes nothing, so it reports what it would merge and leaves the merging to the run that writes.
 
-usage: make_mod_manifest.py <mod folder> (--app <Tears of the Kingdom.app | Breath of the Wild.app> | --romfs <folder>) [--version v143 | botw190]
+usage: make_mod_manifest.py <mod folder> (--app <Tears of the Kingdom.app | Breath of the Wild.app> | --romfs <folder | romfs.bin>) [--version v143 | botw190]
                               [--exclude <RomFS path or glob>]... [--check]
 """
 import argparse
@@ -47,6 +48,11 @@ IMAGE_DIR = None   # the folder of romfs.bin when it is not beside the index: --
 
 def image_file(romfs):
     return (IMAGE_DIR or romfs)/'romfs.bin'
+
+
+def romfs_folder(path):
+    """The RomFS folder --romfs names: the folder itself, or the folder of the romfs.bin it names."""
+    return path.parent if path.name == 'romfs.bin' and path.is_file() else path
 
 
 def app_image_dir(app, version):
@@ -116,7 +122,7 @@ def app_overlays(app, version):
     manifests = [root/'romfs-patches/manifest.tsv', *sorted((root/'romfs-patches-out').glob('*/manifest.tsv'))]
     for path in manifests:
         if path.is_file():
-            for line in path.read_text().splitlines():
+            for line in path.read_text(encoding='utf-8').splitlines():
                 name = line.split('\t', 1)[0]
                 if name and not name.startswith('#'):
                     replaced.setdefault(name, path.parent/name)
@@ -229,13 +235,18 @@ def manifest_text(found):
     return MANIFEST_HEADER + '\n'.join(found.lines) + '\n'
 
 
+def save_manifest(mod, found):
+    """<mod>/manifest.tsv for a Manifest record, UTF-8 with LF line ends on every system (runtime/romfs.c reads it)."""
+    (mod/'manifest.tsv').write_text(manifest_text(found), encoding='utf-8', newline='\n')
+
+
 def write_manifest(mod, romfs, excludes=(), app_replaced=None, merged=None):
     """Write <mod>/manifest.tsv and return what was found (Manifest). Nothing is written when a path is misspelt: the
     caller names the paths, so a mod is never given a manifest that stops the game at start. Tools that write a mod's
     manifest (this script, make_button_icons.py) go through here, so each one reads the record by name."""
     found = manifest(mod, romfs, excludes, app_replaced, merged)
     if not found.misspelt:
-        (mod/'manifest.tsv').write_text(manifest_text(found))
+        save_manifest(mod, found)
     return found
 
 
@@ -244,7 +255,7 @@ def build_patches(romfs):
     folder = romfs.parent/'romfs-patches'
     patches = {}
     if (folder/'manifest.tsv').is_file():
-        for line in (folder/'manifest.tsv').read_text().splitlines():
+        for line in (folder/'manifest.tsv').read_text(encoding='utf-8').splitlines():
             if line and not line.startswith('#'):
                 path, _, sha, _ = line.split('\t')
                 patches[path] = sha
@@ -342,7 +353,8 @@ def main():
     parser.add_argument('mod', type=Path, help='the mod folder, files under their RomFS paths')
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument('--app', type=Path, help='the built Tears of the Kingdom.app or Breath of the Wild.app')
-    source.add_argument('--romfs', type=Path, help='a folder holding romfs.bin and runtime-index.bin')
+    source.add_argument('--romfs', type=Path, help='a folder holding romfs.bin and runtime-index.bin, or that romfs.bin '
+                        '(extracted/<version>/romfs; the build\'s overlay is the romfs-patches folder beside it)')
     parser.add_argument('--romfs-data', type=Path, help='the folder holding romfs.bin when it is not beside the index (an app '
                         'built with --mac-game-data library: <data>/GameData/<version>; with --app that folder is the default)')
     parser.add_argument('--version', choices=APP_VERSIONS, help='the game version (default: the mod folder name)')
@@ -354,7 +366,7 @@ def main():
                              'this before it replaces a player\'s mod folder)')
     args = parser.parse_args()
     version = args.version or (args.mod.resolve().name if args.mod.resolve().name in APP_VERSIONS else None)
-    romfs = args.romfs
+    romfs = romfs_folder(args.romfs) if args.romfs else None
     if args.app:
         if not version:
             parser.error('name the game version with --version (or name the mod folder v0, v112, v121, v143, botw160 or botw190)')
@@ -419,7 +431,7 @@ def main():
         print(f'--check: nothing written; the manifest would hold {len(found.lines)} files '
               f'({len(found.lines) - len(found.added)} replaced, {len(found.added)} added)')
         return
-    (args.mod/'manifest.tsv').write_text(manifest_text(found))
+    save_manifest(args.mod, found)
     print(f'{args.mod/"manifest.tsv"}: {len(found.lines)} files ({len(found.lines) - len(found.added)} replaced, {len(found.added)} added)')
 
 

@@ -165,6 +165,15 @@ class ModManifest(unittest.TestCase):
         (self.root/'picked/romfs.bin').unlink()   # gone: the build's folder
         self.assertEqual(make_mod_manifest.app_image_dir(app, 'botw190'), self.root/'disk/Games/botw190')
 
+    def test_romfs_may_name_the_image_and_the_manifest_has_lf_line_ends(self):
+        self.put('Sound/B.bwav', b'dubbed')
+        result = run(self.mod, '--romfs', self.romfs/'romfs.bin')   # as push_device_windows.py --romfs names it
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = (self.mod/'manifest.tsv').read_bytes()
+        self.assertNotIn(b'\r', data)   # Python on Windows wrote CR LF; runtime/romfs.c reads the bytes as they are
+        self.assertEqual(data.decode().splitlines()[1], '\t'.join(['Sound/B.bwav', '6', hashlib.sha256(b'dubbed').hexdigest(),
+                                                                   hashlib.sha256(FILES['Sound/B.bwav']).hexdigest()]))
+
     def test_romfs_data_names_the_folder_of_the_image(self):
         index = self.root/'index-only'
         index.mkdir()

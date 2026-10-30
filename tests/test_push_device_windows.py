@@ -34,11 +34,21 @@ def read_pack(parts):
 
 
 class Counting(app_container.LocalContainer):
+    """Records what it is asked to do (uploads, and every upload, write and remove in order in ops); with stop set, the
+    upload after that many raises, as a cable pulled out would."""
     def __init__(self, *a):
-        super().__init__(*a); self.uploads = []
+        super().__init__(*a); self.uploads, self.ops, self.stop = [], [], None
 
     def upload(self, rel, *args, **kw):
-        self.uploads.append(rel); super().upload(rel, *args, **kw)
+        if self.stop is not None and len(self.uploads) >= self.stop:
+            raise OSError('the cable came out')
+        self.uploads.append(rel); self.ops.append(('upload', rel)); super().upload(rel, *args, **kw)
+
+    def write(self, rel, data):
+        self.ops.append(('write', rel)); super().write(rel, data)
+
+    def remove(self, rel):
+        self.ops.append(('remove', rel)); super().remove(rel)
 
 
 def quiet(*_):
@@ -155,6 +165,118 @@ class Push(unittest.TestCase):
         info = app_container.ipa_info(self.ipa(['GameData/shader-seed/seed-manifest.json']))
         self.assertEqual(info['carries'], {'seed': True, 'romfs': False})
         self.assertEqual(self.box.installed()['CFBundleIdentifier'], 'a.b')
+
+
+FONT, TABLE, LAYOUT = ('Font/Font.Nin_NX_NVN.bfarc.zs', 'System/Resource/ResourceSizeTable.Product.140.Nin_NX_NVN.rsizetable.zs',
+                       'UI/LayoutArchive/Common.Product.140.Nin_NX_NVN.blarc.zs')
+
+
+class Mods(unittest.TestCase):
+    """push-mod and remove-mod: a RomFS mod in Documents/mods/<version>, which ios/Sources/main.m hands to the runtime
+    when it holds a manifest.tsv; the manifest is written as make_mod_manifest.py writes it."""
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory(); self.root = Path(self.dir.name)
+        self.box = Counting(self.root/'device', 'a.b')
+        self.on_device = self.root/'device'/push.MODS/'v143'
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def mod(self, files, name='mod', extra=''):
+        folder = self.root/name
+        lines = []
+        for path, data in files.items():
+            (folder/path).parent.mkdir(parents=True, exist_ok=True); (folder/path).write_bytes(data)
+            lines.append(f'{path}\t{len(data)}\t{hashlib.sha256(data).hexdigest()}\t{"0" * 64}')
+        (folder/'manifest.tsv').write_bytes(('# path\tsize\tsha256\toriginal_sha256\n' + '\n'.join(lines) + '\n' + extra).encode())
+        (folder/(LAYOUT + '.mod-original')).parent.mkdir(parents=True, exist_ok=True)
+        (folder/(LAYOUT + '.mod-original')).write_bytes(b'the mod\'s own archive, not listed')
+        return folder
+
+    def device_files(self):
+        return {p.relative_to(self.on_device).as_posix(): p.read_bytes() for p in self.on_device.rglob('*') if p.is_file()}
+
+    def test_the_listed_files_go_in_and_the_manifest_last(self):
+        files = {FONT: b'font' * 300, TABLE: b'table', LAYOUT: b'layout' * 50}
+        mod = self.mod(files)
+        self.assertEqual(push.push_mod(self.box, mod, log=quiet), 'copied')
+        self.assertEqual(self.device_files(), {**files, 'manifest.tsv': (mod/'manifest.tsv').read_bytes()})   # not .mod-original
+        written = self.box.ops.index(('write', f'{push.MODS}/v143/manifest.tsv'))
+        self.assertTrue(all(i < written for i, op in enumerate(self.box.ops) if op[0] == 'upload'))
+        self.assertEqual(push.push_mod(self.box, mod, log=quiet), 'present')
+        out = []
+        self.box.install(self.ipa()); push.status(self.box, log=out.append)
+        self.assertIn('mods/v143: 3 files in manifest.tsv', out)
+
+    def ipa(self):
+        ipa = self.root/'a.ipa'
+        with zipfile.ZipFile(ipa, 'w') as z:
+            z.writestr('Payload/A.app/Info.plist', plistlib.dumps({'CFBundleIdentifier': 'a.b'}))
+        return ipa
+
+    def test_a_stopped_copy_goes_on_without_the_manifest_in_place(self):
+        old = self.mod({FONT: b'old font', LAYOUT: b'old layout'}, 'old')
+        push.push_mod(self.box, old, log=quiet)
+        new_files = {FONT: b'new font', LAYOUT: b'new layout', TABLE: b'table'}   # FONT and LAYOUT keep their sizes
+        new = self.mod(new_files, 'new')
+        self.box.stop = len(self.box.uploads) + 1   # the cable comes out after the first file
+        with self.assertRaises(OSError):
+            push.push_mod(self.box, new, log=quiet)
+        self.assertFalse((self.on_device/'manifest.tsv').exists())   # the app loads no half-copied mod
+        self.assertEqual((self.on_device/push.COPYING).read_bytes(), (new/'manifest.tsv').read_bytes())
+        self.box.stop = None; self.box.uploads.clear()
+        self.assertEqual(push.push_mod(self.box, new, log=quiet), 'copied')
+        self.assertEqual(len(self.box.uploads), 2)   # the file copied before the stop is kept
+        self.assertEqual(self.device_files(), {**new_files, 'manifest.tsv': (new/'manifest.tsv').read_bytes()})
+
+    def test_another_mod_replaces_the_folder(self):
+        push.push_mod(self.box, self.mod({FONT: b'a', 'Sound/Extra.bwav': b'extra'}, 'one'), log=quiet)
+        two = self.mod({LAYOUT: b'b'}, 'two')
+        push.push_mod(self.box, two, log=quiet)
+        self.assertEqual(self.device_files(), {LAYOUT: b'b', 'manifest.tsv': (two/'manifest.tsv').read_bytes()})
+        self.assertFalse((self.on_device/'Sound').exists())
+
+    def test_a_mod_the_game_would_refuse_is_not_copied(self):
+        files = {FONT: b'font'}
+        cases = {
+            'no manifest': lambda m: (m/'manifest.tsv').unlink(),
+            'changed file': lambda m: (m/FONT).write_bytes(b'FONT'),
+            'blank CR LF line': lambda m: (m/'manifest.tsv').write_bytes((m/'manifest.tsv').read_bytes() + b'\r\n'),
+            'path out of the RomFS': lambda m: (m/'manifest.tsv').write_text(
+                f'../{FONT}\t4\t{hashlib.sha256(b"font").hexdigest()}\t-\n'),
+            'listed twice': lambda m: (m/'manifest.tsv').write_bytes((m/'manifest.tsv').read_bytes() * 2),
+        }
+        for name, spoil in cases.items():
+            with self.subTest(name):
+                mod = self.mod(files, name.replace(' ', '-')); spoil(mod)
+                with self.assertRaises(push.PushError):
+                    push.push_mod(self.box, mod, log=quiet)
+                self.assertFalse(self.on_device.exists())
+
+    def test_remove_mod_takes_the_folder_away(self):
+        push.push_mod(self.box, self.mod({FONT: b'font', LAYOUT: b'layout'}), log=quiet)
+        self.box.ops.clear()
+        self.assertEqual(push.remove_mod(self.box, log=quiet), 'removed')
+        self.assertEqual(self.box.ops[0], ('remove', f'{push.MODS}/v143/manifest.tsv'))
+        self.assertFalse(self.on_device.exists())
+        self.assertEqual(push.remove_mod(self.box, log=quiet), 'none')
+
+    def test_the_commands_with_simulate(self):
+        import subprocess
+        mod = self.mod({FONT: b'font'})
+        script = TOOLS/'push_device_windows.py'
+        def run(*args):
+            return subprocess.run([sys.executable, str(script), *map(str, args), '--simulate', self.root/'device'],
+                                  capture_output=True, text=True)
+        deploy = run('deploy', self.ipa(), '--no-backup', '--mod', mod)
+        self.assertEqual(deploy.returncode, 0, deploy.stderr)
+        self.assertEqual((self.on_device/FONT).read_bytes(), b'font')
+        removed = run('remove-mod', '--bundle-id', 'a.b')
+        self.assertEqual(removed.returncode, 0, removed.stderr)
+        self.assertFalse(self.on_device.exists())
+        pushed = run('push-mod', mod, '--bundle-id', 'a.b', '--version', 'v121')
+        self.assertEqual(pushed.returncode, 0, pushed.stderr)
+        self.assertTrue((self.root/'device'/push.MODS/'v121/manifest.tsv').is_file())
 
 
 if __name__ == '__main__':
