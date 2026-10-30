@@ -418,7 +418,7 @@ Tears of the Kingdom; for Breath of the Wild replace `TOTK` with `BotW` and `tot
 - Shader cache: `~/Library/Application Support/MacNativeGames/TOTK/shader-cache`
 - Shaders the shared list lacks: `~/Library/Application Support/MacNativeGames/TOTK/shader-list-contribution.txt` (the game asks before it starts whether to send them; see the [shared shader list](shader-list.md))
 - Mods: `~/Library/Application Support/MacNativeGames/TOTK/mods/<v0|v112|v121|v143>`; see [mods.md](mods.md). On an iPhone or iPad: the app's `Documents/mods/<version>` (`v143` for 1.4.3), or `<version>-<slot>` beside it; see [Controller button icons, on Windows](#controller-button-icons-on-windows) and [Durability and battery presets, on Windows](#durability-and-battery-presets-on-windows)
-- Log: off by default. `defaults write org.macnativegames.totk TOTK_DEBUG_LOG -bool YES` turns it on from the next start, written to `~/Library/Logs/MacNativeGames/totk.log`. On an iPhone: Settings › TOTK › Debug log, written to the app's `Documents/log.txt`.
+- Log: off by default. `defaults write org.macnativegames.totk TOTK_DEBUG_LOG -bool YES` turns it on from the next start, written to `~/Library/Logs/MacNativeGames/totk.log`. On an iPhone or iPad: Settings › Apps › Tears of the Kingdom › Debug log, written to the app's `Documents/log.txt`.
 
 ## Known issues
 

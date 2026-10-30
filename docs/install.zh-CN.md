@@ -438,7 +438,7 @@ python3.14 games/totk/ios/tools/install_device.py "<文件夹>/TOTK-Vision.app" 
 - 模组：`~/Library/Application Support/MacNativeGames/TOTK/mods/<v0|v112|v121|v143>`，见 [mods.md](mods.md)。iPhone 或 iPad 上是 App 的 `Documents/mods/<版本>`（1.4.3 是 `v143`），或它旁边的 `<版本>-<档位>`，见[手柄按键图标（Windows）](#手柄按键图标windows)和[耐久和电池预设（Windows）](#耐久和电池预设windows)。
 - 日志：默认关闭。
   - Mac：`defaults write org.macnativegames.totk TOTK_DEBUG_LOG -bool YES`，下次启动起写到 `~/Library/Logs/MacNativeGames/totk.log`。
-  - iPhone：在“设置 › TOTK › 記錄日誌”打开，写到 App 的 `Documents/log.txt`。
+  - iPhone 或 iPad：在“设置 › App › Tears of the Kingdom › 記錄日誌”打开，写到 App 的 `Documents/log.txt`。
 
 ## 已知问题
 
