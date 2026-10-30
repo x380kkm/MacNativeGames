@@ -12,7 +12,7 @@ targets:
     platform: iOS
     sources:
       - Sources
-      - Settings.bundle   # the Settings app pane; stored in NSUserDefaults, applied in main.m (motion: Sources/motion_input.m)
+      - Settings.bundle   # the Settings app pane; options stored in NSUserDefaults
       - path: ../runtime
         excludes:
           - frontend.m
@@ -24,7 +24,8 @@ targets:
       - path: ../runtime/loader.c
         compilerFlags: "-Dmain=totk_host_main"
     dependencies:
-      - sdk: CoreMotion.framework   # the device's gyro (Sources/motion_input.m)
+      - sdk: CoreHaptics.framework   # the iPhone's Taptic Engine while the touch controls are used
+      - sdk: CoreMotion.framework    # the iPhone's own gyro while the touch controls are used
     info:
       path: Sources/Info.plist
       properties:
@@ -44,9 +45,9 @@ targets:
         UIViewControllerBasedStatusBarAppearance: false
         UIApplicationSupportsIndirectInputEvents: true
         GCSupportsControllerUserInteraction: true
+        NSMotionUsageDescription: Tilt the iPhone to aim while you play with the on-screen controls.
         GCSupportedGameControllers:
           - ProfileName: ExtendedGamepad
-        NSMotionUsageDescription: "使用设备陀螺仪控制游戏中的体感瞄准。"
         CADisableMinimumFrameDurationOnPhone: true
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
