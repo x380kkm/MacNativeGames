@@ -1,6 +1,7 @@
 """One image at two colour slots (docs/how-it-works.md) with production code from nvn_mtl.m and nvn_obj.h: which slot is
-stored and where clears go, in tests/rt_dup_probe.c, for each combination of platform, game and TOTK_RT_DUP. The store
-itself is Objective-C, so a source check keeps both store paths asking the rule."""
+stored, what a draw marks and where clears go, in tests/rt_dup_probe.c, for each combination of platform, game and
+TOTK_RT_DUP. The places that use these rules are Objective-C, so source checks keep the draw, both store paths, the
+mid-pass clear and the tile read asking them."""
 import os
 from pathlib import Path
 import re
@@ -62,6 +63,22 @@ class OneImageAtTwoSlots(unittest.TestCase):
         finish = production(r'static void sd_finish\(void\) \{.*?\n}\n')
         self.assertIn('enc_r_store(g_enc, t->depth, rt_dup_unstored(t) ? MTLStoreActionDontCare : MTLStoreActionStore, (NSUInteger)t->idx);', finish)
         self.assertIn('int dead = t->state == 2 || udc_dead || xvdead || rt_dup_unstored(t);', finish)
+
+    def test_every_draw_marks_the_slots_it_wrote_through(self):
+        note = production(r'static void udc_note_draw\(NvProg \*pr\) \{.*?\n}\n')
+        self.assertIn('sd_att *t = &g_sd[i];\n        rt_dup_note_draw(t, S.chmask.mask, shader_color_mask);', note)
+        self.assertIn('udc_note_draw(pr);', production(r'static void draw_inner\(const p_draw \*dw, const p_draw_idx \*di\) \{.*?\n}\n'))
+
+    def test_a_mid_pass_clear_reaches_the_other_tile_copies(self):
+        clear = production(r'static void clear_quad\(const p_clear_color \*c\) \{.*?\n}\n')
+        self.assertIn('unsigned others = rt_dup_other_slots(&R.rt, c->index);\n'
+                      '    for (int i = 0; i < 8; i++) if ((others >> i & 1) && g_pass.cfmt[i])\n'
+                      '        clear_quad_core(en, g_pass.cfmt, g_pass.hd ? g_pass.dfmt : 0, g_pass.hs ? g_pass.sfmt : 0, '
+                      'g_pass.samples, tw, th, i, c->mask, c->rgba, sc);', clear)
+
+    def test_a_draw_does_not_read_one_of_two_tile_copies(self):
+        self.assertIn('if (rt_dup_other_slots(&R.rt, j)) return nil;',
+                      production(r'static id<MTLFunction> att_fb_take\(.*?\n}\n'))
 
 
 if __name__ == '__main__':

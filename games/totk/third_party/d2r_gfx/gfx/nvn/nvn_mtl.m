@@ -4579,6 +4579,19 @@ static void rt_dup_share_clears(void) {
     for (int i = 1; i < R.rt.n && i < 8; i++) { int j = rt_dup_of(&R.rt, i); if (j >= 0 && R.clear_c[j]) { R.clear_c[i] = 1; R.cc[i] = R.cc[j]; } }
 }
 #endif
+/* The other colour slots holding the image at `slot`, as a bit mask; 0 with the rule off. */
+static unsigned rt_dup_other_slots(const p_set_rt *r, int slot) {
+    if (!rt_dup_on()) return 0;
+    int first = rt_dup_of(r, slot); if (first < 0) first = slot;
+    unsigned others = 0;
+    for (int i = first; i < r->n && i < 8; i++) if (i != slot && (i == first || rt_dup_of(r, i) == first)) others |= 1u << i;
+    return others;
+}
+/* Marks a slot a draw wrote through (rt_dup_unstored): its channels are not masked off and the fragment shader outputs to
+   it. A shader without reflection has colour mask 0, and then the channel mask decides. */
+static void rt_dup_note_draw(sd_att *t, uint32_t channel_mask, uint32_t shader_color_mask) {
+    if (!t->depth && ((channel_mask >> (4 * t->idx)) & 0xf) && (!shader_color_mask || (shader_color_mask >> t->idx & 1))) t->drawn = 1;
+}
 static int rt_dup_unstored(const sd_att *t) {
     if (t->depth || !rt_dup_on()) return 0;
     const sd_att *keep = NULL;
@@ -6853,7 +6866,7 @@ static void udc_note_draw(NvProg *pr) {
     uint32_t shader_color_mask = pr ? pr->udc_cmask : 0;
     for (int i = 0; i < g_nsd; i++) {
         sd_att *t = &g_sd[i];
-        if (!t->depth && t->idx >= 0 && ((S.chmask.mask >> (4 * t->idx)) & 0xf) && (!shader_color_mask || (shader_color_mask >> t->idx & 1))) t->drawn = 1;   // rt_dup_unstored: 0 mask = no reflection, the channel mask decides
+        rt_dup_note_draw(t, S.chmask.mask, shader_color_mask);
         if (image_write) { t->wrote = 1; t->wwhy = 1; }
         else if (t->depth == 0 && t->idx >= 0 && (((S.chmask.mask >> (4 * t->idx)) & 0xf) || (shader_color_mask >> t->idx & 1))) { t->wrote = 1; t->wwhy = (S.chmask.mask >> (4 * t->idx)) & 0xf ? 2 : 3; }
         else if (t->depth == 1 && S.ds.dw) { t->wrote = 1; t->wwhy = 4; }
@@ -10944,7 +10957,7 @@ static id<MTLFunction> att_fb_take(NvProg *pr, uint64_t *rs, int *n) {
         if (b->kind != NVN_RB_TEX || k == 8) return nil;
         int j = -1; for (int m = 0; m < R.rt.n && m < 8; m++) if (R.rt.color[m] && R.rt.color[m]->serial == ser) { j = m; break; }
         if (j < 0) return nil;   // the depth attachment
-        if (rt_dup_on()) for (int m = j + 1; m < R.rt.n && m < 8; m++) if (rt_dup_of(&R.rt, m) == j) return nil;   // two tile copies: which one holds the draws is known at the store
+        if (rt_dup_other_slots(&R.rt, j)) return nil;   // two tile copies: which one holds the draws is known at the store
         uint64_t s_; int lv, sl; rt_sub(&R.rt, j, &s_, &lv, &sl);
         if (lv || sl) return nil;
         int tid = (int)(h & 0xfffff); void *tv_ = NULL; if (tid) tex_fast_rid(tid, &tv_); __unsafe_unretained id<MTLTexture> tv = (__bridge id<MTLTexture>)tv_;
@@ -12094,9 +12107,9 @@ static void clear_quad(const p_clear_color *c) {
     if (!g_pass.cfmt[c->index]) MDIE("partial color clear: attachment %d not in the pass", c->index);
     clear_quad_core(en, g_pass.cfmt, g_pass.hd ? g_pass.dfmt : 0, g_pass.hs ? g_pass.sfmt : 0, g_pass.samples, tw, th, c->index, c->mask, c->rgba, sc);
     /* every tile copy of the image: which one is stored is known only at the end of the pass */
-    if (rt_dup_on()) { int first = rt_dup_of(&R.rt, c->index); if (first < 0) first = c->index;
-        for (int i = first; i < R.rt.n && i < 8; i++) if (i != c->index && g_pass.cfmt[i] && (i == first || rt_dup_of(&R.rt, i) == first))
-            clear_quad_core(en, g_pass.cfmt, g_pass.hd ? g_pass.dfmt : 0, g_pass.hs ? g_pass.sfmt : 0, g_pass.samples, tw, th, i, c->mask, c->rgba, sc); }
+    unsigned others = rt_dup_other_slots(&R.rt, c->index);
+    for (int i = 0; i < 8; i++) if ((others >> i & 1) && g_pass.cfmt[i])
+        clear_quad_core(en, g_pass.cfmt, g_pass.hd ? g_pass.dfmt : 0, g_pass.hs ? g_pass.sfmt : 0, g_pass.samples, tw, th, i, c->mask, c->rgba, sc);
 }
 /* Depth/stencil clears obey the scissor and stencil bit mask even inside an active pass. */
 static void clear_ds_core(id<MTL4RenderCommandEncoder> en, const uint32_t cfmt[8], uint32_t dfmt, uint32_t sfmt, uint32_t samples,

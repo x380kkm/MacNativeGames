@@ -1,5 +1,6 @@
-/* The occlusion report rules on crafted submissions. test_occlusion_guard.py inserts production occl_guard_on and
-   occl_settle here. argv[1]: "on" or "off", the guard state the switch and the build are expected to give. */
+/* The occlusion report rules on crafted submissions. test_occlusion_guard.py inserts production occl_guard_on,
+   occl_settle and vis_count_lost here. argv[1]: "on" or "off", the guard state the switch and the build are expected to
+   give. */
 #include "nvn_obj.h"
 #include <stdatomic.h>
 #include <stdio.h>
@@ -9,6 +10,7 @@
 /* the platform the production code is built for: a Mac's own headers define this macro too */
 #undef TARGET_OS_IPHONE
 #define TARGET_OS_IPHONE IOS_BUILD
+static int g_vis_counting;   /* nvn_mtl.m declares it among variables used nowhere here */
 
 /* PRODUCTION_CODE */
 
@@ -123,11 +125,20 @@ static void guard_off(void) {
     CHECK(ops[0].sum == 1); CHECK(RAISED() == 1 && GUARDED() == 0);
 }
 
+/* A draw that missed its counter marks the reports since the reset: with the guard, and while a query is counting. */
+static void expect_count_lost(int marked) {
+    g_vis_counting = 1; g_vis_skipped = 0; vis_count_lost();
+    CHECK(g_vis_skipped == marked);
+    g_vis_counting = 0; g_vis_skipped = 0; vis_count_lost();
+    CHECK(!g_vis_skipped);
+}
+
 int main(int argc, char **argv) {
     if (argc != 2) return 2;
     int expected_on = !strcmp(argv[1], "on");
     CHECK(occl_guard_on() == expected_on);
     if (expected_on) guard_on(); else guard_off();
+    expect_count_lost(expected_on);
     printf(fails ? "occlusion guard FAILED\n" : "occlusion guard ok\n");
     return fails != 0;
 }
