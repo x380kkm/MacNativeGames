@@ -114,4 +114,11 @@ const char *totk_large_textures_default(void) { return "auto"; }
    the eviction wants free (TOTK_TEX_EVICT_LOW_MB) that makes 6,271 MiB; the app's allowance at launch has to cover that.
    The allowance is what the system actually grants, entitlement included; the installed memory does not say it. */
 #define FULL_NEEDS_MIB 6400ull
-const char *totk_large_textures_auto(uint64_t available_bytes) { return available_bytes >= FULL_NEEDS_MIB << 20 ? "full" : "save"; }
+const char *totk_large_textures_auto(uint64_t available_bytes) {
+#ifdef GAME_BOTW
+    (void)available_bytes;
+    return "save";   /* measured on Tears of the Kingdom only (TOTK_BOTW_BUILD) */
+#else
+    return available_bytes >= FULL_NEEDS_MIB << 20 ? "full" : "save";
+#endif
+}
