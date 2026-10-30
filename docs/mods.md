@@ -306,9 +306,9 @@ last longer and changes how fast the Zonai battery drains and recharges. It runs
 a RomFS that a build extracted: `--romfs` takes a folder holding both `romfs.bin` and `runtime-index.bin`, which is a
 build's `extracted/<version>/romfs` or the same folder in an app (`Contents/Resources/totk/extracted/<version>/romfs`). An
 app built with `--mac-game-data library` keeps its image apart from that folder, so use the build's work folder for it. This
-is a gameplay change. Upstream's app has neither the folders nor the Settings row described here, so it plays as shipped. In
-this fork the row exists on the iPhone and iPad with `strong` as its default; it has an effect only once that folder is
-on the device.
+is a gameplay change. Upstream's app has neither the folders `--slots` makes nor a Settings row for them, so it plays as
+shipped. In this fork Settings › Apps › Tears of the Kingdom › Mods › Durability and battery exists on the iPhone and iPad
+with Strong as its default; it has an effect only once the folder of the chosen value is on the device.
 
 | Option | What it edits | Limits |
 | --- | --- | --- |
@@ -725,8 +725,9 @@ mod 的 `exefs/` 里可能还有这些文件，构建这样处理：
 耗电和回充速度。它只要 Python 3.14 就能单独运行，但读取的是构建解出的 RomFS：`--romfs` 指向同时有 `romfs.bin` 和
 `runtime-index.bin` 的文件夹，也就是构建的 `extracted/<版本>/romfs`，或 App 里的同一个文件夹
 （`Contents/Resources/totk/extracted/<版本>/romfs`）。用 `--mac-game-data library` 构建的 App 把镜像放在这个文件夹以外，
-这时要用构建的工作目录。这是对玩法的改动。上游的 App 既没有这里说的文件夹，也没有这里说的
-“设置”行，所以按原样运行。本分支的 iPhone 和 iPad 有这一行，默认值是 `strong`；对应的文件夹在设备上时它才起作用。
+这时要用构建的工作目录。这是对玩法的改动。上游的 App 既没有 `--slots` 生成的文件夹，也没有对应的“设置”行，所以按原样运行。
+本分支的 iPhone 和 iPad 有“设置 › App › Tears of the Kingdom › 模组 › 耐久与电池”这一行，默认值是“强”；选中的值对应的
+文件夹在设备上时它才起作用。
 
 | 选项 | 改什么 | 限制 |
 | --- | --- | --- |
