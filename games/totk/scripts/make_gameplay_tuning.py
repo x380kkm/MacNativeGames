@@ -29,7 +29,7 @@ with make_mod_manifest.py's manifest over the whole folder, so the folder may ho
 --slots builds the four folders <version>-off, -moderate, -strong and -max that the Settings pane's mod slot row chooses
 between (ios/Settings.bundle TOTK_MOD_SLOT, ios/Sources/main.m, values in SLOTS): each one is a copy of --base with that
 slot's values, with its own manifest. A slot folder is built beside its old one and then takes its place, and a run that
-fails leaves no part of it behind. A folder of that name whose record does not name that slot stops the run, as one that
+fails leaves no part of it behind and the old one where it was. A folder of that name whose record does not name that slot stops the run, as one that
 --into wrote in does: it may hold other files. The folder of the slots may not be --base or lie inside it, and --base may
 not be a slot folder or lie inside one.
 
@@ -335,6 +335,8 @@ def build_slots(folder, base, version, original):
             staging.rename(target)
         except BaseException:   # a copy of the base, with tuned game files in a later slot: not one more folder to find
             shutil.rmtree(staging, ignore_errors=True)
+            if previous.exists() and not target.exists():   # the second rename did not happen: the old slot goes back
+                previous.rename(target)
             raise
         shutil.rmtree(previous, ignore_errors=True)
         print(f'{target}: ready')

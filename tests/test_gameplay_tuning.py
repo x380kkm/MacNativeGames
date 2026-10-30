@@ -1,7 +1,9 @@
 """games/totk/scripts/make_gameplay_tuning.py on a small fake RomFS made here (no game data): the fields it edits, what it
 writes and refuses, values that never compound, the manifest, the four slot folders, and a damaged RomFS."""
+import contextlib
 import hashlib
 import importlib.util
+import io
 import json
 import plistlib
 import shutil
@@ -11,6 +13,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 HAS_ZSTD = importlib.util.find_spec('compression.zstd') is not None   # Python 3.14
 ROOT = Path(__file__).resolve().parents[1]
@@ -414,6 +417,47 @@ class Slots(Fixture):
         self.build()
         self.assertEqual(self.life(SWORD, folder=mods/'v143-strong'), 100)
         self.assertEqual(sorted(p.name for p in mods.iterdir() if p.name.startswith('.')), [])
+
+    def build_with_failing_rename(self, name):
+        """A run whose rename of the folder `name` fails, as a file held open in that folder makes it fail on Windows."""
+        import make_gameplay_tuning as tool
+        rename = Path.rename
+
+        def failing(path, target):
+            if path.name == name:
+                raise PermissionError(f'{path} is in use')
+            return rename(path, target)
+        original = tool.read_original(self.romfs)
+        with patch.object(Path, 'rename', failing), contextlib.redirect_stdout(io.StringIO()), self.assertRaises(PermissionError):
+            tool.build_slots(self.root/'mods', self.root/'icons', 'v143', original)
+
+    def assert_four_slots(self, mods):
+        import make_gameplay_tuning as tool
+        self.assertEqual(sorted(p.name for p in mods.iterdir()), sorted(f'v143-{slot}' for slot in tool.SLOTS))
+
+    def test_a_slot_that_cannot_move_into_place_leaves_the_old_one_there(self):
+        mods = self.build()
+        (mods/'v143-strong/from-before.bin').write_bytes(b'the old slot')
+        self.build_with_failing_rename('.v143-strong.new')
+        self.assert_four_slots(mods)
+        self.assertEqual((mods/'v143-strong/from-before.bin').read_bytes(), b'the old slot')
+        self.build()
+        self.assert_four_slots(mods)
+        self.assertFalse((mods/'v143-strong/from-before.bin').exists())
+
+    def test_a_slot_that_cannot_move_aside_stays(self):
+        mods = self.build()
+        (mods/'v143-strong/from-before.bin').write_bytes(b'the old slot')
+        self.build_with_failing_rename('v143-strong')
+        self.assert_four_slots(mods)
+        self.assertEqual((mods/'v143-strong/from-before.bin').read_bytes(), b'the old slot')
+
+    def test_a_failed_run_puts_back_the_slot_a_stopped_run_moved_aside(self):
+        mods = self.build()
+        (mods/'v143-strong').rename(mods/'.v143-strong.old')
+        self.build_with_failing_rename('.v143-strong.new')
+        self.assert_four_slots(mods)
+        self.assertEqual(self.life(SWORD, folder=mods/'v143-strong'), 100)
 
     def test_the_version_names_the_folders(self):
         import make_gameplay_tuning as tool
