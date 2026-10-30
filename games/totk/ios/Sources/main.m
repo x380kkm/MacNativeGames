@@ -91,7 +91,7 @@ static void apply_display_settings(void);   // below, next to the pane helpers i
 - (void)safeAreaInsetsDidChange { [super safeAreaInsetsDidChange]; runtime_ios_sync_safe_area(self); }   // the HUD boxes keep out of the notch
 @end
 
-@interface TOTKGameController : UIViewController @property(nonatomic,strong) TOTKMetalView *gameView; @end
+@interface TOTKGameController : UIViewController @property(nonatomic,strong) TOTKMetalView *gameView; @property(nonatomic,strong) TOTKTouchPad *touchPad; @end
 @implementation TOTKGameController
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -106,7 +106,7 @@ static void apply_display_settings(void);   // below, next to the pane helpers i
 #endif
     [self.view addSubview:self.gameView];
     runtime_ios_attach_layer((CAMetalLayer *)self.gameView.layer, self.gameView);
-    TOTKTouchPad *pad=[[TOTKTouchPad alloc] initWithFrame:self.view.bounds];pad.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;[self.view addSubview:pad];
+    TOTKTouchPad *pad=[[TOTKTouchPad alloc] initWithFrame:self.view.bounds];pad.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;[self.view addSubview:pad];self.touchPad=pad;
 }
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
@@ -124,6 +124,7 @@ static void apply_display_settings(void);   // below, next to the pane helpers i
     __weak TOTKGameController *weak = self;
     void (^start)(void) = ^{
         apply_display_settings();
+        [weak.touchPad setNeedsDisplay];   // its frame rate button has to show the rate just applied
         runtime_ios_sync_drawable(weak.gameView);   // the drawable follows the chosen picture (TOTK_IOS_DRAWABLE_H)
         [weak boot];
     };
@@ -247,6 +248,16 @@ static void apply_frame_env(const totk_frame_env *e, int overwrite) {
 }
 
 #if !TARGET_OS_VISION
+/* The preset row's rate for the run about to start. The runtime reads TOTK_PHONE_FPS once, and the touch controls' first draw
+   has usually done that before the start screen's pick (hle_nvn.c phone_holds_30), so the runtime is told as well as the
+   variable. A value that is not the row's changes nothing; apply_settings has logged it. */
+static void apply_preset_frame_rate(const char *fps) {
+    totk_frame_env fe;
+    if (!totk_preset_frame_env_build(fps, &fe)) return;
+    apply_frame_env(&fe, 1);
+    runtime_phone_fps_set(fe.phone_fps ? 30 : 60);
+}
+
 /* The presets' picture and frame rate, from the rows the Settings app and the start screen (start_screen.m) write;
    applied once, just before the game thread starts, so the start screen's pick counts (after PR #433: applying them in
    didFinishLaunching as well left a 1080 drawable behind when the start screen then turned Full HD off). The picture keys
@@ -264,8 +275,7 @@ static void apply_display_settings(void) {
     apply_operation_mode(prenv.operation);
     // Frame rate: Settings.bundle › TOTK_PHONE_FPS, or the 60 / 30 button of the touch controls, which saves it here too.
     NSString *fps = [d stringForKey:@"TOTK_PHONE_FPS"] ?: @"60";
-    totk_frame_env fe;
-    if (totk_preset_frame_env_build(fps.UTF8String, &fe)) apply_frame_env(&fe, 1);
+    apply_preset_frame_rate(fps.UTF8String);
 }
 #endif
 

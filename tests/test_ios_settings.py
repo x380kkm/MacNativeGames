@@ -1,6 +1,7 @@
 """The iPad Settings pane's mode -> environment mapping, without UIKit or a device."""
 import plistlib
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -37,6 +38,34 @@ class IOSSettings(unittest.TestCase):
         run = subprocess.run([str(self._helper())], capture_output=True, text=True)
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
         self.assertIn('ios settings ok', run.stdout)
+
+    def test_the_frame_rate_reaches_the_runtime_on_the_launch_it_is_picked(self):
+        """Production main.m and hle_nvn.c in main.m's order, in tests/ios_frame_pick_probe.c."""
+        compiler = shutil.which('cc')
+        if not compiler:
+            self.skipTest('A C compiler is required')
+        main = (ROOT / 'games/totk/ios/Sources/main.m').read_text(encoding='utf-8')
+        hle = (ROOT / 'games/totk/third_party/d2r_gfx/gfx/nvn/hle_nvn.c').read_text(encoding='utf-8')
+        code = '\n'.join((
+            re.search(r'static _Atomic int g_phone_hold30 = -1;.*?\nvoid runtime_phone_fps_set\(int fps\) \{[^\n]*\n', hle, re.S).group(),
+            re.search(r'static void apply_frame_env\(.*?\n}\n', main, re.S).group(),
+            re.search(r'static void apply_preset_frame_rate\(.*?\n}\n', main, re.S).group()))
+        directory = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, directory)
+        source = directory / 'probe.c'
+        fixture = (ROOT / 'tests/ios_frame_pick_probe.c').read_text(encoding='utf-8')
+        source.write_text(fixture.replace('/* PRODUCTION_CODE */', code), encoding='utf-8')
+        executable = directory / 'ios-frame-pick'
+        build = subprocess.run(
+            [compiler, '-std=gnu11', '-O1', '-Wall', '-Wextra', '-Werror', '-I', str(ROOT / 'games/totk/ios/Sources'),
+             str(source), str(ROOT / 'games/totk/ios/Sources/settings_map.c'), '-o', str(executable)],
+            capture_output=True, text=True)
+        self.assertEqual(build.returncode, 0, build.stdout + build.stderr)
+        run = subprocess.run([str(executable)], capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        self.assertIn('frame pick ok', run.stdout)
+        self.assertIn('apply_preset_frame_rate(fps.UTF8String);',
+                      re.search(r'static void apply_display_settings\(void\) \{.*?\n}', main, re.S).group())
 
     def test_pane_values_are_accepted(self):
         executable = self._helper()

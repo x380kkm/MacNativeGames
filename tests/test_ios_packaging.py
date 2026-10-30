@@ -199,6 +199,7 @@ class StartScreen(unittest.TestCase):
         self.assertRegex(main, r'getenv\("TOTK_START_SCREEN"\);\n    if \(screen && !strcmp\(screen, "0"\)\) start\(\);')
         body = start.group(1)
         self.assertLess(body.index('apply_display_settings()'), body.index('runtime_ios_sync_drawable'))
+        self.assertLess(body.index('apply_display_settings()'), body.index('[weak.touchPad setNeedsDisplay]'))   # the rate its button shows
         self.assertLess(body.index('runtime_ios_sync_drawable'), body.index('boot]'))
         finish = main.index('- (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:')
         self.assertNotIn('boolForKey:@"TOTK_DOCKED"', main[finish:], 'Full HD is applied when the game starts, not at launch')

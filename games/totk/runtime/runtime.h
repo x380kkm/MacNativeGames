@@ -186,7 +186,7 @@ void runtime_mouse_button(int button, int down);    /* main thread; 0 left, 1 ri
 void runtime_mouse_release(void);                   /* main thread: buttons up, stick centred */
 void runtime_touch_pad_set(const RuntimeGamepadState *state);   /* on-screen touch controls (iOS) */
 int runtime_phone_fps(void);                /* d2r_gfx hle_nvn.c, iPhone / iPad: 30 while held at 30 (TOTK_PHONE_FPS), else 60 */
-void runtime_phone_fps_set(int fps);        /* 30 holds 30, anything else up to 60: the touch controls' button, at once */
+void runtime_phone_fps_set(int fps);        /* 30 holds 30, anything else up to 60, at once: the touch controls' button and the start of the game (ios/Sources/main.m) */
 /* Controller rumble and motion: on by default, off with TOTK_RUMBLE=0 / TOTK_GYRO=0, and without the variable in an agent's
    test session or with rumble.txt / gyro.txt saying off (runtime/feedback_settings.h). The game's hid side is in
    runtime/hid_feedback.c, a controller's haptics and motion sensors in runtime/gamepad_feedback.m (Mac, iPhone and iPad),
