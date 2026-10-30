@@ -189,8 +189,8 @@ zero or non-zero, and a light it scales by the count stays dark. Two kinds of re
 - a report not known to be complete: a counted draw never reached its counter (its shader, pipeline, pass or counter slot
   was missing), or a command buffer of the submission failed;
 - every report of a frame in which all queries came to 0. Such a frame cannot be told from counters that did not count.
-  An iPad run (2026-10-30, 835 to 903 s) had about 9 queries per submission all at 0 with no draw skipped; the log cannot
-  say whether they were true.
+  An iPad run (2026-10-30, 835 to 903 s) had 9 to 13 queries per submission, nearly all frames with every one at 0 and no
+  draw skipped; the log cannot say whether they were true.
 
 `TOTK_OCCL_GUARD=0` turns this off, and `TOTK_OCCL_GUARD=1` turns it on on the Mac, where it is off by default. A draw held
 back while its shader is prepared raises its report on every platform, whatever the switch says. The `[occl]` line in the
