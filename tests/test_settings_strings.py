@@ -30,8 +30,29 @@ class SettingsStrings(unittest.TestCase):
         self.check(plistlib.loads(ROOT.read_bytes()))
 
     def test_botw_pane(self):
-        root = build_ipa.settings_without_totk(plistlib.loads(ROOT.read_bytes()))
+        root = build_ipa.settings_for_botw(plistlib.loads(ROOT.read_bytes()))
         self.check(root)
+
+    def footer(self, root, key):
+        """The footer of the group that holds the row `key`."""
+        specs = root["PreferenceSpecifiers"]
+        return specs[next(i for i, s in enumerate(specs) if s.get("Key") == key) - 1]["FooterText"]
+
+    def test_the_large_textures_footer_says_what_auto_does_in_each_game(self):
+        root = plistlib.loads(ROOT.read_bytes())
+        self.assertIn("Auto: Full on a device with enough memory", self.footer(root, "TOTK_LARGE_TEXTURES"))
+        botw = self.footer(build_ipa.settings_for_botw(root), "TOTK_LARGE_TEXTURES")
+        self.assertIn("Auto: Save memory in this game.", botw)
+        self.assertIn("自动：这个游戏用“省内存”。", botw)
+        self.assertNotIn("enough memory", botw)
+        self.assertNotIn("内存足够", botw)
+
+    def test_the_mods_footer_holds_for_every_version(self):
+        """The row ships in every Tears of the Kingdom build, and each reads the folder of its own version."""
+        footer = self.footer(plistlib.loads(ROOT.read_bytes()), "TOTK_MOD_SLOT")
+        self.assertNotIn("v143", footer)
+        self.assertIn("Documents/mods/<version>-<slot>", footer)
+        self.assertIn("Documents/mods/<版本>-<档位>", footer)
 
     def test_written_bundle(self):
         with tempfile.TemporaryDirectory() as d:

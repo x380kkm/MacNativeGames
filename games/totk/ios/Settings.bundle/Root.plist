@@ -454,7 +454,7 @@
 			<key>Title</key>
 			<string>模组 · Mods</string>
 			<key>FooterText</key>
-			<string>在电脑上生成四个文件夹（make_gameplay_tuning.py --slots）并复制到设备（push_device_windows.py push-slots）后，这里选用 Documents/mods/v143-&lt;档位&gt;。没有这个文件夹时用 Documents/mods/v143，也没有就不加载模组。耐久只影响模组生效后新拿到的武器、盾和弓；电池格数和回充前的等待不变。重新启动游戏后生效 · picks Documents/mods/v143-&lt;slot&gt;, once the four folders are made on the PC (make_gameplay_tuning.py --slots) and copied to the device (push_device_windows.py push-slots). Without that folder the game uses Documents/mods/v143, or no mod. Durability applies to weapons, shields and bows obtained after the mod is in; the battery's cells and the pause before it recharges stay as they are. Takes effect after relaunching the game</string>
+			<string>在电脑上生成四个文件夹（make_gameplay_tuning.py --slots）并复制到设备（push_device_windows.py push-slots）后，这里选用 Documents/mods/&lt;版本&gt;-&lt;档位&gt;。没有这个文件夹时用 Documents/mods/&lt;版本&gt;，也没有就不加载模组。耐久只影响模组生效后新拿到的武器、盾和弓；电池格数和回充前的等待不变。重新启动游戏后生效 · picks Documents/mods/&lt;version&gt;-&lt;slot&gt;, once the four folders are made on the PC (make_gameplay_tuning.py --slots) and copied to the device (push_device_windows.py push-slots). Without that folder the game uses Documents/mods/&lt;version&gt;, or no mod. Durability applies to weapons, shields and bows obtained after the mod is in; the battery's cells and the pause before it recharges stay as they are. Takes effect after relaunching the game</string>
 		</dict>
 		<dict>
 			<key>Type</key>

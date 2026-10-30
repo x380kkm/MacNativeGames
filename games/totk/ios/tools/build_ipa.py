@@ -22,8 +22,8 @@ def settings_without_totk(root):
     """The pane for Breath of the Wild, in place: every row Root.plist marks TOTKApp=totk (its picture modes and scene
     sizes, the custom picture tier, MetalFX, and the aspect-ratio row, whose key means ultrawide in Breath of the Wild),
     and any group they leave empty. The Full HD switch stays: Breath of the Wild's docked branch renders the scene at
-    1920x1080, so the row is described for it in build_ipa.py. The mark sits on the row itself, so this list is not kept
-    a second time here; tests/test_ios_packaging.py checks that every marked row is gone from the pane."""
+    1920x1080, so the row is described for it in settings_for_botw. The mark sits on the row itself, so this list is not
+    kept a second time here; tests/test_ios_packaging.py checks that every marked row is gone from the pane."""
     specs=[s for s in root['PreferenceSpecifiers'] if s.get('TOTKApp')!='totk']
     kept=[]
     for i,s in enumerate(specs):
@@ -33,6 +33,20 @@ def settings_without_totk(root):
         kept.append(s)
     root['PreferenceSpecifiers']=kept
     return root
+
+def settings_for_botw(root):
+    """The pane for Breath of the Wild, in place: the footers that say something else for this game, then
+    settings_without_totk. Its docked scene is 1920x1080, not 1600x900, and its Auto for large textures is always Save
+    memory (ios/Sources/settings_map.c totk_large_textures_auto). settings_fr.json has these English texts too."""
+    specs=root['PreferenceSpecifiers']
+    at=next(i for i,s in enumerate(specs) if s.get('Key')=='TOTK_DOCKED')
+    specs[at-1]['FooterText']=('開啟：遊戲的底座設定，輸出和畫面都是 1920×1080，需要較快的 iPad（M 系列）。關閉：手持 1280×720（內部 960×540）。'
+                               '重新啟動遊戲後生效 · on: the game\'s docked settings, 1920×1080 output and scene (for an M-series iPad). '
+                               'Off: handheld 1280×720 (960×540 inside). Takes effect after relaunching the game')
+    at=next(i for i,s in enumerate(specs) if s.get('Key')=='TOTK_LARGE_TEXTURES')
+    specs[at-1]['FooterText']=(specs[at-1]['FooterText'].replace('自动：内存足够的设备用“完整”，其余用“省内存”。','自动：这个游戏用“省内存”。')
+                               .replace('Auto: Full on a device with enough memory, Save memory on the others.','Auto: Save memory in this game.'))
+    return settings_without_totk(root)
 
 def run(args, cwd, log, env):
     log.parent.mkdir(parents=True,exist_ok=True)
@@ -165,14 +179,7 @@ def main():
     if botw:   # game_patches_botw.c instead of both Tears of the Kingdom files; GAME_BOTW for the runtime and the graphics layer
         project=project.replace('          - game_patches_botw.c','          - game_patches.c\n          - game_patches_v143.c')
         project=project.replace('-I../build\n','-I../build -DGAME_BOTW=1 -DGAME_'+a.version.upper()+'=1\n')
-        # The Settings pane with the Full HD switch described for this game: its docked scene is 1920x1080, not 1600x900.
-        # Then the rows Root.plist marks TOTKApp=totk leave (settings_without_totk above); the Full HD row is not one.
-        root=plistlib.loads((settings/'Root.plist').read_bytes()); specs=root['PreferenceSpecifiers']
-        at=next(i for i,s in enumerate(specs) if s.get('Key')=='TOTK_DOCKED')
-        specs[at-1]['FooterText']=('開啟：遊戲的底座設定，輸出和畫面都是 1920×1080，需要較快的 iPad（M 系列）。關閉：手持 1280×720（內部 960×540）。'
-                                   '重新啟動遊戲後生效 · on: the game\'s docked settings, 1920×1080 output and scene (for an M-series iPad). '
-                                   'Off: handheld 1280×720 (960×540 inside). Takes effect after relaunching the game')
-        root=settings_without_totk(root)
+        root=settings_for_botw(plistlib.loads((settings/'Root.plist').read_bytes()))
         (settings/'Root.plist').write_bytes(plistlib.dumps(root))
     elif a.version=='v143': project=project.replace('          - loader.c','          - loader.c\n          - game_patches.c')
     else: project=project.replace('          - loader.c','          - loader.c\n          - game_patches_v143.c')
