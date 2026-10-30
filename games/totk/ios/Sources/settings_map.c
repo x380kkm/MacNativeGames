@@ -74,6 +74,7 @@ totk_key_layer totk_key_layer_of(const char *key) {
     if (key) for (unsigned i = 0; i < sizeof LAYERS / sizeof LAYERS[0]; i++) if (!strcmp(LAYERS[i].key, key)) return LAYERS[i].layer;
     return TOTK_KEY_ALWAYS;
 }
+int totk_custom_layer;
 
 const char *totk_frame_button_key(int custom) { return custom ? NULL : "TOTK_PHONE_FPS"; }
 int totk_frame_button_target(int held30) { return held30 ? 60 : 30; }

@@ -261,12 +261,12 @@ static void apply_preset_frame_rate(const char *fps) {
 /* The presets' picture and frame rate, from the rows the Settings app and the start screen (start_screen.m) write;
    applied once, just before the game thread starts, so the start screen's pick counts (after PR #433: applying them in
    didFinishLaunching as well left a 1080 drawable behind when the start screen then turned Full HD off). The picture keys
-   keep a devicectl value (overwrite=0), as before the pane had layers; the frame keys follow the row. The custom layer was
-   handed over in apply_settings and the start screen does not write its rows, so it is left as it is. The mapping is
-   settings_map.c's. */
+   keep a devicectl value (overwrite=0), as before the pane had layers; the frame keys follow the row. A run on the custom
+   layer had it handed over in apply_settings and the start screen does not write its rows, so it is left as it is. The
+   mapping is settings_map.c's. */
 static void apply_display_settings(void) {
+    if (totk_custom_layer) return;
     NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
-    if ([d boolForKey:@"TOTK_CUSTOM_PICTURE"]) return;
     totk_preset_env prenv;
     totk_preset_env_build([d boolForKey:@"TOTK_DOCKED"], &prenv);
     if (prenv.drawable) setenv("TOTK_IOS_DRAWABLE_H", prenv.drawable, 0);
@@ -309,8 +309,10 @@ static void apply_settings(void) {
     NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
     [d registerDefaults:defaults];
     /* One switch between the pane's layers (Root.plist, "Use custom settings"): the layer that is off is not handed
-       over at all, so neither can overwrite the other. Which keys belong to which layer is settings_map.c's table. */
+       over at all, so neither can overwrite the other. Which keys belong to which layer is settings_map.c's table. This is
+       the only read of the switch: the run stays on this layer (totk_custom_layer). */
     BOOL custom = [d boolForKey:@"TOTK_CUSTOM_PICTURE"];
+    totk_custom_layer = custom;
     totk_key_layer layer_of = custom ? TOTK_KEY_CUSTOM : TOTK_KEY_PRESET;
 #if !TARGET_OS_VISION
     BOOL scene_from_launch = getenv("TOTK_RENDER_RES") != NULL;   // here, before the loop hands the stored row to that variable

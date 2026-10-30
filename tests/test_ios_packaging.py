@@ -108,7 +108,7 @@ class FullHD(unittest.TestCase):
         # The presets' picture is handed over once, when the game starts (apply_display_settings, after the start
         # screen's pick), and not while the custom layer is on (after PR #433).
         body = re.search(r'static void apply_display_settings\(void\) \{.*?\n}', main, re.S).group(0)
-        self.assertIn('if ([d boolForKey:@"TOTK_CUSTOM_PICTURE"]) return;', body)
+        self.assertIn('if (totk_custom_layer) return;', body)
         self.assertIn('if (prenv.drawable) setenv("TOTK_IOS_DRAWABLE_H", prenv.drawable, 0);', body)
         self.assertEqual(main.count('totk_preset_env_build('), 1, 'the presets\' picture goes in one place')
         # Both games have the switch: Breath of the Wild's docked branch renders 1920x1080 too (ad35dfa), so no
@@ -216,7 +216,7 @@ class StartScreen(unittest.TestCase):
         """The presets do not apply with the pane's custom layer on (apply_display_settings), so the screen leaves their rows
         out, the controller's focus stays off them and they are not saved. test_ios_settings.c checks the rule for the rows."""
         screen = (TOOLS.parent/'Sources/start_screen.m').read_text(encoding='utf-8')
-        self.assertIn('_firstRow = totk_start_first_row([d boolForKey:@"TOTK_CUSTOM_PICTURE"], [self settingsPaneHas:@"TOTK_DOCKED"]);', screen)
+        self.assertIn('_firstRow = totk_start_first_row(totk_custom_layer, [self settingsPaneHas:@"TOTK_DOCKED"]);', screen)
         self.assertIn(': _firstRow == 1 ? @[icon, title, fpsRow, _start] : @[icon, title, _start];', screen)
         self.assertIn('if (up) _row = MAX(_firstRow, _row - 1);', screen)
 

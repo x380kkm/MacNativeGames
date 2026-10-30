@@ -26,7 +26,6 @@ static NSString *T(NSString *z, NSString *e) { return zh() ? z : e; }
     bg.frame = self.bounds; bg.needsDisplayOnBoundsChange = YES;
     [self.layer addSublayer:bg];
 
-    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
     NSString *name = [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleDisplayName"] ?: @"Game";
 
     UIImageView *icon = [[UIImageView alloc] initWithImage:[self appIcon]];
@@ -49,7 +48,7 @@ static NSString *T(NSString *z, NSString *e) { return zh() ? z : e; }
     }
     UIStackView *pictureRow = [self row:T(@"画面", @"Picture") control:_picture];
     UIStackView *fpsRow = [self row:T(@"帧率", @"Frame rate") control:_fps];
-    _firstRow = totk_start_first_row([d boolForKey:@"TOTK_CUSTOM_PICTURE"], [self settingsPaneHas:@"TOTK_DOCKED"]);
+    _firstRow = totk_start_first_row(totk_custom_layer, [self settingsPaneHas:@"TOTK_DOCKED"]);
 
     UILabel *note = [UILabel new];
 #ifdef GAME_BOTW

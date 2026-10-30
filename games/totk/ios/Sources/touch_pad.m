@@ -132,10 +132,9 @@ static const CGFloat kFpsButtonSize = 34;
 - (void)switchFrameRate {
     /* The pane's two layers (settings_map.c): the preset layer saves 30 / 60 in its own row; the custom layer keeps the
        cap in the pane, so this only holds 30 until the next launch and saves nothing. */
-    BOOL custom = [NSUserDefaults.standardUserDefaults boolForKey:@"TOTK_CUSTOM_PICTURE"];
     int fps = totk_frame_button_target(runtime_phone_fps() == 30);
     runtime_phone_fps_set(fps);
-    const char *key = totk_frame_button_key(custom);
+    const char *key = totk_frame_button_key(totk_custom_layer);
     if (key) [NSUserDefaults.standardUserDefaults setObject:fps == 30 ? @"30" : @"60" forKey:@(key)];
     [self setNeedsDisplay];
 }

@@ -57,6 +57,10 @@ const char *totk_large_textures_auto(uint64_t available_bytes);
    the switch says. A key that moves to a layer must be listed here, so main.m's filter and the tests share one table. */
 typedef enum { TOTK_KEY_ALWAYS, TOTK_KEY_PRESET, TOTK_KEY_CUSTOM } totk_key_layer;
 totk_key_layer totk_key_layer_of(const char *key);
+/* 1 when this run is on the custom layer. apply_settings reads the switch at launch and sets this once; everything after
+   asks here, not the switch: the Settings app can flip it while the app runs, and the pane promises that only a relaunch
+   takes it, so a run never mixes the layers. */
+extern int totk_custom_layer;
 
 /* The in-game frame-rate button (touch_pad.m). The preset layer saves the choice under its own row; the custom layer
    keeps the cap in the pane, so the button only holds 30 until the next launch and saves nothing (NULL). */

@@ -216,6 +216,22 @@ class IOSSettings(unittest.TestCase):
                         body.index('for (NSString *key in defaults)'))
         self.assertIn('if (!scene_from_launch) setenv("TOTK_RENDER_RES", fallback.UTF8String, 1);', body)
 
+    def test_a_run_stays_on_the_layer_it_launched_with(self):
+        """The Settings app can flip the switch while the app runs, and the pane promises that only a relaunch takes it. Read
+        again at Play, a flip left neither layer's picture applied, or a 1080 drawable in handheld mode. A source check, the
+        readers being UIKit's: apply_settings reads the switch once, and everything after asks what it decided."""
+        sources = ROOT / 'games/totk/ios/Sources'
+        texts = {file.name: file.read_text(encoding='utf-8') for file in sources.iterdir() if file.suffix in ('.m', '.c')}
+        self.assertEqual([name for name, text in texts.items() for _ in re.finditer(r'ForKey:@"TOTK_CUSTOM_PICTURE"', text)],
+                         ['main.m'])
+        body = re.search(r'static void apply_settings\(void\) \{.*?\n}\n', texts['main.m'], re.S).group()
+        self.assertIn('BOOL custom = [d boolForKey:@"TOTK_CUSTOM_PICTURE"];\n    totk_custom_layer = custom;', body)
+        self.assertEqual(sum(len(re.findall(r'totk_custom_layer = ', text)) for text in texts.values()), 1)
+        self.assertIn('if (totk_custom_layer) return;',
+                      re.search(r'static void apply_display_settings\(void\) \{.*?\n}', texts['main.m'], re.S).group())
+        self.assertIn('totk_frame_button_key(totk_custom_layer)', texts['touch_pad.m'])
+        self.assertIn('totk_start_first_row(totk_custom_layer,', texts['start_screen.m'])
+
     def test_every_row_is_applied_at_launch(self):
         # main.m registers every TOTK_* row that has a DefaultValue and hands it to the runtime as an environment
         # variable; a row without one, or a key without the prefix, would show in Settings and change nothing.
