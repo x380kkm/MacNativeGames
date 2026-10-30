@@ -15,8 +15,9 @@ and scripts/prepare_shader_seed.py --modules use them as they are:
   build/from-ipa/embed/<module>.x0.bin, .w.bin, .x1.bin, ios_embed.h, embed.S, layout.json      the app's nine embedded
       sections, with what gen_embed.py writes for them: the header and assembly that embed them (embed.S names this
       machine's paths; gen_embed.py <out>/rewritten/v143 <embed.S> --text-dir <out>/build/from-ipa/embed main subsdk0 sdk
-      writes it again elsewhere), and their layout (--layout-of) for a runtime linked with zero-filled sections
-      (package_ipa_windows.py writes these sections into it)
+      writes it again elsewhere), and their layout (--layout-of). main's text there lacks the game patches added since
+      30a1b93, so the runtime takes other sections: export_ios_windows.py makes them from rewritten/v143 into
+      build/export-ios, and package_ipa_windows.py writes those into it
   build/from-ipa/app/Assets.car, AppIcon*.png, default.metallib, Info.plist        the old app's own resources
   recover-manifest.json      every file with its size, SHA-256 and what it was checked against
 
@@ -30,9 +31,9 @@ recover-manifest.json is written:
     scripts/prepare_runtime.py table_bytes. Symbols, relocations, constructor flag, init tags and main's probe stub are
     made again from the pinned images as prepare_runtime.py makes them and must be the same. The gates are not in the
     image; each must have its site branch into the patch area and its return address follow a blr x30.
-  - The nine sections against the app's own _ios_embed hashes and the sizes and SHA-256 ios/ci/embed-layout-v143.json
-    pins; ios_embed.h and layout.json, written by gen_embed.py from the recovered modules and sections, must name the
-    same.
+  - The nine sections against the app's own _ios_embed hashes and the sizes and SHA-256 of the sections of the app
+    30a1b93 built (recover_modules.APP_SECTIONS); ios_embed.h and layout.json, written by gen_embed.py from the
+    recovered modules and sections, must name the same.
   - romfs.bin, Deflate in the IPA (2 minutes on an SSD, 2026-10-26): streamed to disk while its SHA-256 is computed,
     against the pinned size and SHA-256, and moved into place only then. index.json
     against the same pin; runtime-index.bin made again from it (prepare_romfs_backend.py) must be byte for byte the app's.
@@ -62,7 +63,7 @@ sys.path.insert(0, str(REPO))
 import build_app                 # noqa: E402  the pins and the shared-font acceptance of a build from the card image
 import macho                     # noqa: E402
 import recover_modules           # noqa: E402  the three code modules and the runtime tables
-from recover_modules import EMBED_LAYOUT, NAMES, VERSION, RecoverError, digest, require   # noqa: E402
+from recover_modules import APP_SECTIONS, NAMES, VERSION, RecoverError, digest, require   # noqa: E402
 
 PINS = build_app.VERSIONS[VERSION]
 OLD_APP_FILES = ('Assets.car', 'default.metallib', 'Info.plist')   # and every AppIcon*.png
@@ -164,10 +165,8 @@ def step_code(ipa, out):
     """The three modules, their layout files, the runtime tables and the nine embedded sections."""
     say('code: reading the app executable')
     exe = macho.MachO(ipa.read('TOTK' if ipa.has('TOTK') else ipa.info['CFBundleExecutable']))
-    modules, embed, pins = recover_modules.old_modules(exe), macho.embed_hashes(exe, NAMES), recover_modules.section_pins()
-    if not pins:
-        out.notes.append(f'{EMBED_LAYOUT.relative_to(REPO).as_posix()} is not in this checkout: sections checked against the app only')
-    got = {m['name']: recover_modules.recover_module(exe, m, embed, pins, PINS['rewritten_sha256'][f'{m["name"]}.patched.bin'])
+    modules, embed = recover_modules.old_modules(exe), macho.embed_hashes(exe, NAMES)
+    got = {m['name']: recover_modules.recover_module(exe, m, embed, PINS['rewritten_sha256'][f'{m["name"]}.patched.bin'])
            for m in modules}
     tables = recover_modules.runtime_tables(modules, got['main']['image'])
     rewritten, sections, data = f'rewritten/{VERSION}', 'build/from-ipa/embed', f'build/game-data/{VERSION}'
@@ -182,8 +181,8 @@ def step_code(ipa, out):
                  'patch_nso.py KEY_INDEX')
         for part, blob in r['parts'].items():
             sect = ','.join(macho.module_sections(name)[part])
-            out.write(f'{sections}/{name}.{part}.bin', blob, f'the app\'s section {sect}; SHA-256 as its _ios_embed'
-                      + (f' and {EMBED_LAYOUT.name}' if pins else ''), pins.get((name, part), (0, None))[1])
+            out.write(f'{sections}/{name}.{part}.bin', blob, f'the app\'s section {sect}; SHA-256 as its _ios_embed and '
+                      'recover_modules.APP_SECTIONS', APP_SECTIONS[(name, part)][1])
         if r['restored']:
             out.notes.append(f'{name}: original instruction put back at ' + ' '.join(f'{s:#x}' for s in r['restored']))
         if not r['found']['dt_hash']:
@@ -201,11 +200,11 @@ def step_code(ipa, out):
     run_gen_embed('--layout-of', out.path(sections), out.path(f'{sections}/layout.json'), *NAMES)
     require(recover_modules.embed_header_hashes(out.path(f'{sections}/ios_embed.h').read_text()) == embed,
             'ios_embed.h from gen_embed.py names other hashes than the app\'s _ios_embed')
-    require(not pins or json.loads(out.path(f'{sections}/layout.json').read_text()) == json.loads(EMBED_LAYOUT.read_text()),
-            f'layout.json from gen_embed.py --layout-of differs from {EMBED_LAYOUT.name}')
+    require(recover_modules.layout_pins(json.loads(out.path(f'{sections}/layout.json').read_text())) == APP_SECTIONS,
+            'layout.json from gen_embed.py --layout-of differs from recover_modules.APP_SECTIONS')
     out.record(f'{sections}/ios_embed.h', 'gen_embed.py; its nine hashes equal the app\'s _ios_embed')
     out.record(f'{sections}/embed.S', f'gen_embed.py (.incbin paths of this machine; linker flags {flags})')
-    out.record(f'{sections}/layout.json', 'gen_embed.py --layout-of' + (f'; equal to {EMBED_LAYOUT.name}' if pins else ''))
+    out.record(f'{sections}/layout.json', 'gen_embed.py --layout-of; equal to recover_modules.APP_SECTIONS')
     say(f'code: {", ".join(NAMES)} are the pinned rewrites; runtime tables {sum(len(m["relocs"]) for m in modules)} '
         f'relocations, {sum(len(m["gates"]) for m in modules)} gates')
 

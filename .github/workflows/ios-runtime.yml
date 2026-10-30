@@ -3,10 +3,13 @@ name: iOS runtime without game content
 # Builds the iPhone / iPad executable of Tears of the Kingdom 1.4.3 from this repository alone
 # (games/totk/ios/tools/build_ipa.py --runtime-only). The game's code sections are zero-filled to the sizes in
 # games/totk/ios/ci/embed-layout-v143.json and the executable carries its hashes; that layout was written with
-# gen_embed.py --layout-of from the sections of an app built at 30a1b93 (the pinned 1.4.3 rewrites as that build's
-# export left them). The machine that holds the game files writes the sections into the executable, adds the game data
-# and signs the app. TOTK-runtime.zip holds TOTK.app and beside it TOTK-runtime.commit, the commit the run built
-# (github.sha), which package_ipa_windows.py takes as the app's TOTKSourceCommit.
+# gen_embed.py --layout-of from the sections games/totk/ios/tools/export_ios_windows.py exports on Windows: the pinned
+# 1.4.3 rewrites with the game patches of games/totk/runtime/game_patches_v143.c as of upstream f1d0077 written in (an
+# app built at 30a1b93 lacks two of them in main's text, the fade-counter fix and the render-resolution patch). A change
+# to the words those patches write needs a new export and the layout written again from it. The machine that holds the
+# game files writes the sections into the executable, adds the game data and signs the app. TOTK-runtime.zip holds
+# TOTK.app and beside it TOTK-runtime.commit, the commit the run built (github.sha), which package_ipa_windows.py takes as
+# the app's TOTKSourceCommit.
 
 on:
   push:

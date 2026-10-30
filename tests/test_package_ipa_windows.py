@@ -3,9 +3,10 @@ the nine module sections written at their file offsets and checked against the l
 table, the Info.plist rules, the runtime archive and the commit it names, the IPA written without zsign and the work
 folder's game data.
 
-With TOTK_IOS_RUNTIME=<the ios-runtime workflow's TOTK-runtime.zip>, TOTK_RECOVERED=<recover_ipa.py --out folder> and
-zsign (--zsign's $TOTK_ZSIGN or PATH) the real runtime is packaged (its nine sections written, ad-hoc signed) and the
-signature is checked, including that one changed byte of a written section is found."""
+With TOTK_IOS_RUNTIME=<the ios-runtime workflow's TOTK-runtime.zip>, TOTK_RECOVERED=<recover_ipa.py --out folder, with
+export_ios_windows.py's sections in build/export-ios> and zsign (--zsign's $TOTK_ZSIGN or PATH) the real runtime is
+packaged (its nine sections written, ad-hoc signed) and the signature is checked, including that one changed byte of a
+written section is found."""
 import contextlib
 import hashlib
 import io
@@ -142,6 +143,22 @@ class Sections(unittest.TestCase):
             with self.assertRaises(package.PackageError):
                 package.fill_sections(bytearray(rt.exe), rt.dir, rt.layout)
 
+    def test_the_check_only_run_reads_the_runtime_in_place_and_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as d:
+            rt = Runtime(Path(d))
+            layout = Path(d)/'layout.json'; layout.write_text(json.dumps(rt.layout))
+            artifact = runtime_zip(Path(d)/'TOTK-runtime.zip', COMMIT + '\n', exe=rt.exe)
+            before = sorted(p.relative_to(d).as_posix() for p in Path(d).rglob('*'))
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                package.check_only(artifact, rt.dir, layout)
+            self.assertEqual(out.getvalue().count('to be written'), 9)
+            self.assertIn(COMMIT, out.getvalue())
+            self.assertEqual(sorted(p.relative_to(d).as_posix() for p in Path(d).rglob('*')), before)
+            other = Runtime(Path(d)/'other', embed_of={k: 'e' * 64 for k in rt.modules})   # built for another layout
+            with self.assertRaisesRegex(package.PackageError, 'another embed layout'), contextlib.redirect_stdout(io.StringIO()):
+                package.check_only(runtime_zip(Path(d)/'other.zip', exe=other.exe), rt.dir, layout)
+
     def test_the_chain_is_read_from_the_executable(self):
         exe = b'\0junk\0rt-' + CHAIN.encode() + b'\0more\0' + CHAIN.encode() + b'\0'
         self.assertEqual(package.runtime_chain(exe), CHAIN)
@@ -206,14 +223,14 @@ class InfoPlist(unittest.TestCase):
         self.assertNotIn('TOTKSourceCommit', info)   # set to this build's only where the old app had them
 
 
-def runtime_zip(path, commit=None, folder=''):
-    """A TOTK-runtime.zip as ios-runtime.yml packs it: <folder>TOTK.app (an executable, the build's signature and a
+def runtime_zip(path, commit=None, folder='', exe=b'exe'):
+    """A TOTK-runtime.zip as ios-runtime.yml packs it: <folder>TOTK.app (the executable exe, the build's signature and a
     settings file) and, given commit, TOTK-runtime.commit beside it holding that text; an artifact from before the
     workflow wrote the file has none."""
     app = f'{folder}TOTK.app/'
     with zipfile.ZipFile(path, 'w') as z:
         z.writestr(app, b''); z.writestr(app + 'Info.plist', plistlib.dumps({'CFBundleExecutable': 'TOTK'}))
-        z.writestr(app + 'TOTK', b'exe'); z.writestr(app + '_CodeSignature/CodeResources', b'old')
+        z.writestr(app + 'TOTK', exe); z.writestr(app + '_CodeSignature/CodeResources', b'old')
         z.writestr(app + 'Settings.bundle/Root.plist', b'settings')
         if commit is not None:
             z.writestr(folder + package.RUNTIME_COMMIT, commit)
@@ -325,7 +342,7 @@ class RealRuntime(unittest.TestCase):
             info = package.unpack_runtime(Path(os.environ['TOTK_IOS_RUNTIME']), app)
             exe_name = info['CFBundleExecutable']
             exe = bytearray((app/exe_name).read_bytes())
-            done = package.fill_sections(exe, tree/'build/from-ipa/embed', json.loads(package.LAYOUT.read_text()))
+            done = package.fill_sections(exe, tree/package.EXPORT_DIR, json.loads(package.LAYOUT.read_text()))
             self.assertEqual(len(done), 9)
             (app/exe_name).write_bytes(exe)
             ipa = Path(d)/'adhoc.ipa'

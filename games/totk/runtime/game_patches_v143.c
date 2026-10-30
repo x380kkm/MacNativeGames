@@ -253,7 +253,7 @@ static void patch_fade_increment(Module *m){
     uint32_t jump_s3=branch(0x6155e4,stub+48);
     uint32_t jump_s4=branch(0x615660,stub+64);
 #if TARGET_OS_IPHONE
-    /* Code sections exported before this fix (an app repackaged on Windows from one built at 30a1b93) have the original
+    /* Code sections exported before this fix (those of an app built at 30a1b93) have the original
        instructions and an empty stub: the game's own counters stay, as patch_render_res keeps the game's size. The display
        link paces the game at 60 Hz on iOS (frontend_ios.m TOTK_IOS_LINK_HZ), below the ~63.5 FPS where the increment is 0. */
     int original=1;

@@ -191,18 +191,18 @@ GPU 画游戏贴图时，用的是 App 为 Metal 复制的一份副本。为省�
 
 ### 没有卡带镜像和密钥：在 Windows 上用旧 IPA 重新打包
 
-如果已经没有卡带镜像、更新包或 `prod.keys`，但还留着 `build_ipa.py` 在提交 30a1b93 打出的 1.4.3 IPA（RomFS 在 App 里，签没签名都可以），可以在 Windows 电脑上用它做出新的 App。下面的工具从这个 IPA 还原游戏文件，重做启动着色器（App 第一次启动时导入的着色器种子）。它们取用 GitHub Actions 只用本仓库构建的运行时（不含游戏代码和数据的 App），把这些拼起来，签名并安装。脚本需要 Python 3.14，除 `push_device_windows.py` 外只用标准库。`push_device_windows.py` 还要用 pymobiledevice3：运行它的 Python 里没有这个包时，它会换到 pymobiledevice3 自己的 Python 里重新运行。在仓库目录里用 `python` 运行这些脚本（用 `python -I` 也可以）。它们调用的其他程序列在下面。截至 2026-10-26，第 1、2、4 步已在 Windows 上实际运行，第 3 步已在 GitHub Actions 上运行。第 5 步用 `--simulate`（用本地文件夹代替设备）演练过。这些步骤都还没有对真机跑过。
+如果已经没有卡带镜像、更新包或 `prod.keys`，但还留着 `build_ipa.py` 在提交 30a1b93 打出的 1.4.3 IPA（RomFS 在 App 里，签没签名都可以），可以在 Windows 电脑上用它做出新的 App。下面的工具从这个 IPA 还原游戏文件，重做启动着色器（App 第一次启动时导入的着色器种子）。它们取用 GitHub Actions 只用本仓库构建的运行时（不含游戏代码和数据的 App），把这些拼起来，签名并安装。脚本需要 Python 3.14，除 `push_device_windows.py` 外只用标准库。`push_device_windows.py` 还要用 pymobiledevice3：运行它的 Python 里没有这个包时，它会换到 pymobiledevice3 自己的 Python 里重新运行。在仓库目录里用 `python` 运行这些脚本（用 `python -I` 也可以）。它们调用的其他程序列在下面。截至 2026-10-26，第 1、3、5 步已在 Windows 上实际运行，第 4 步已在 GitHub Actions 上运行；第 2 步于 2026-10-30 在 Windows 上运行过。第 5 步还没有用第 2 步的代码节运行过：这要等此后构建的运行时（第 4 步）。第 6 步用 `--simulate`（用本地文件夹代替设备）演练过。这些步骤都还没有对真机跑过。
 
-现在在 Mac 上打的 App 在 main 的代码节里带着两项补丁，30a1b93 打的 App 没有，而这条路线原样沿用那些代码节（2026-10-30）：
+设备不能写代码，所以 iPhone 和 iPad 的 App 带着已经写好游戏补丁的 main 代码，运行时启动时只核对这些补丁（`games/totk/runtime/game_patches_v143.c`）。从上游 `f1d0077`（2026-10-30 合并到这里）起，构建用这种方式多写两项补丁，30a1b93 打的 App 的代码节里两项都没有：
 
-- 1.4.3 针对 60 帧以上渐隐计数的修正（`games/totk/runtime/game_patches_v143.c` 的 `patch_fade_increment`）：四处跳转，以及代码末尾之后新增的 80 字节代码。这些代码节里四处仍是游戏原来的指令，那 80 字节全是零。这时 iPhone / iPad 的运行时保留游戏自己的计数，记一行“fade counters the game's own (not patched at build)”；那里是别的内容时，启动以“1.4.3 embedded fade patch mismatch”停下。iPhone 和 iPad 上显示链接把游戏限在 60 帧，而计数要到约 63.5 帧以上才会停住，所以按代码，画面上没有区别。
-- 渲染分辨率补丁（`patch_render_res`）：main+0x585e48 处是游戏原来的指令，所以场景保持游戏自己的掌机分辨率 1280×720，而不是上文的 960×540；系统“设置” App › App › Tears of the Kingdom 里的“场景分辨率”也不起作用。要改变这一点，打包时得把 main+0x585e48 到 main+0x585e60 之间的四条指令写进代码节，并让布局文件写明代码节的新哈希。
+- 1.4.3 针对 60 帧以上渐隐计数的修正（`patch_fade_increment`）：四处跳转，以及代码末尾之后新增的 80 字节代码。
+- 渲染分辨率补丁（`patch_render_res`）：main+0x585e48 到 main+0x585e60 之间的四条指令。没有它，场景保持游戏自己的掌机分辨率 1280×720，而不是上文的 960×540，系统“设置” App › App › Tears of the Kingdom 里的“场景分辨率”也不起作用。
 
-这两点都还没有在设备上看到过。
+所以这条路线不沿用旧 App 的代码节：第 2 步用本仓库的补丁从还原出的模块重新做出代码节，运行时只接受这些代码节。这两项补丁都还没有在设备上看到过。
 
 需要准备：
 
-- Python 3.14。做着色器另外需要 Visual Studio（“使用 C++ 的桌面开发”和“适用于 Windows 的 C++ Clang 工具”）、.NET 10 SDK、Git for Windows（用它的 `patch`），第一次运行时还要联网。
+- Python 3.14，以及装有“适用于 Windows 的 C++ Clang 工具”的 Visual Studio：第 2 步用它的 clang 编译补丁代码。做着色器另外需要 Visual Studio 的“使用 C++ 的桌面开发”、.NET 10 SDK、Git for Windows（用它的 `patch`），第一次运行时还要联网。
 - GitHub 账号和本仓库的 fork。
 - 你的开发证书和私钥（`.p12`）、存放 p12 密码的文件，以及开发描述文件（`.mobileprovision`）：要包含 App 的 bundle id 和你的设备，并授予 `com.apple.developer.kernel.increased-memory-limit`。签名前工具会检查描述文件的平台、有效期、bundle id 和授权（`get-task-allow` 和提高内存上限）。它还检查描述文件里是否列有 `.p12` 里的证书。设备列表不检查。想保留存档，就用设备上那个 App 的 bundle id 和团队。
 - zsign（`--zsign`、`TOTK_ZSIGN` 或 `PATH`）和 Git for Windows 自带的 `openssl`（`mingw64` 下的那个也能读“钥匙串访问”导出的 p12）。
@@ -214,9 +214,17 @@ GPU 画游戏贴图时，用的是 App 为 Metal 复制的一份副本。为省�
 python games/totk/ios/tools/recover_ipa.py <旧的 TOTK.ipa> --out <工作目录>/totk
 ```
 
-每个文件放到位之前都要核对：三个改写后的代码模块和 `expected-v1.4.3.json` 核对，App 嵌入的九个代码节（main、subsdk0、sdk 三个游戏模块各三节）和 `games/totk/ios/ci/embed-layout-v143.json` 核对，RomFS 核对固定的大小和 SHA-256，字体按从卡带镜像构建时的规则接受（与固定的 SHA-256 一致，或是有效的 Switch BFTTF 格式字体文件），覆盖文件和它们的 `manifest.tsv` 以及 RomFS 核对。任何一项核对失败就立即停下，不写 `recover-manifest.json`，所以别的构建打出的 IPA 会被拒绝。解压 17 GB 的 RomFS 在 SSD 上约 2 分钟；再次运行会复用它（约 10 秒），加 `--skip-romfs` 则留到以后再解压。IPA 自带的着色器属于旧的翻译链，不还原。
+每个文件放到位之前都要核对：三个改写后的代码模块和 `expected-v1.4.3.json` 核对，App 嵌入的九个代码节（main、subsdk0、sdk 三个游戏模块各三节）和 30a1b93 打的 App 的代码节（`games/totk/ios/tools/recover_modules.py` 的 `APP_SECTIONS`）核对，RomFS 核对固定的大小和 SHA-256，字体按从卡带镜像构建时的规则接受（与固定的 SHA-256 一致，或是有效的 Switch BFTTF 格式字体文件），覆盖文件和它们的 `manifest.tsv` 以及 RomFS 核对。任何一项核对失败就立即停下，不写 `recover-manifest.json`，所以别的构建打出的 IPA 会被拒绝。解压 17 GB 的 RomFS 在 SSD 上约 2 分钟；再次运行会复用它（约 10 秒），加 `--skip-romfs` 则留到以后再解压。IPA 自带的着色器属于旧的翻译链，不还原。
 
-**2. 做着色器种子：**
+**2. 导出打好游戏补丁的 main 代码：**
+
+```powershell
+python games/totk/ios/tools/export_ios_windows.py --tree <工作目录>/totk
+```
+
+它把九个代码节写进 `<工作目录>/totk/build/export-ios`，第 5 步从这里取。在 Mac 上，`build_ipa.py` 让装载器的 `export-ios` 做这件事。这个工具用 Visual Studio 的 clang 编译补丁代码本身，即 `games/totk/runtime/game_patches_v143.c`（`--clang <clang.exe>` 可以指定别的 clang）。它先把还原出的模块和 `expected-v1.4.3.json` 核对，再按 `build_ipa.py` 的环境对它们打补丁：`TOTK_RENDER_RES=1280x720`，不带任何其他 `TOTK_*` 变量，不管 shell 里设了什么。然后它对代码节运行同一个文件里设备启动时的核对，少了任何一项补丁就报错停下。代码节旁边还写出 `layout.json`，即它们的大小和 SHA-256。`games/totk/ios/ci/embed-layout-v143.json` 必须和它是同一个文件；两者不同时工具会提示，因为按别的布局构建的运行时不接受这些代码节。`--check <文件夹>` 只对文件夹里的代码节运行设备的核对，并列出它们缺的补丁。在实际运行的电脑上（2026-10-30），导出只用了几秒。导出的 main 代码和旧 App 的相差 32 个字：渲染分辨率补丁的 4 条指令、渐隐修正的 8 个跳转和空指令字，以及它新增的 20 个字的代码。另外八个代码节和旧 App 的逐字节相同。
+
+**3. 做着色器种子：**
 
 ```powershell
 python games/totk/ios/tools/seed_windows.py tools --work <种子工作目录>
@@ -225,19 +233,19 @@ python games/totk/ios/tools/seed_windows.py seed --work <种子工作目录> --r
 
 `tools` 构建 `build_app.py` 固定提交的 SPIRV-Cross（源码先和 GitHub 给出的该提交的源码树核对）和 win-x64 版着色器翻译器，放在 `<种子工作目录>/tools/bin`。`seed` 写出 `<种子工作目录>/seed`：1.4.3 约 3.1 万个变体，第一次约 11 分钟，之后会复用已有的翻译。
 
-**3. 在 GitHub Actions 上构建运行时。** 工作流 `.github/workflows/ios-runtime.yml` 在 `macos-26` 机器上只用本仓库构建 App 的可执行文件（`build_ipa.py --runtime-only --embed-layout games/totk/ios/ci/embed-layout-v143.json`），游戏的九个代码节留成全零。在你的 fork 的 Actions 页启用 Actions。推送到分支 `ios-windows-fixes` 的改动涉及 `games/totk/**` 或工作流文件时，工作流就会运行。工作流文件进了 fork 的默认分支后，也可以用“Run workflow”手动运行。下载这次运行的产物 `totk-ios-runtime`（保留 14 天）并解压一次，里面是 `TOTK-runtime.zip`。这个 zip 里有 `TOTK.app` 和 `TOTK-runtime.commit`，后者写着这次运行构建的提交，下一步从这里读取。这样不会有任何游戏内容传到 GitHub，也绝不能传：工作目录、种子、IPA 以及用它们编出的 Metal 库都不要提交，也不要上传。
+**4. 在 GitHub Actions 上构建运行时。** 工作流 `.github/workflows/ios-runtime.yml` 在 `macos-26` 机器上只用本仓库构建 App 的可执行文件（`build_ipa.py --runtime-only --embed-layout games/totk/ios/ci/embed-layout-v143.json`），游戏的九个代码节留成全零。可执行文件带着布局里的代码节哈希，所以在布局于 2026-10-30 改动之前构建的运行时不接受第 2 步的代码节，第 5 步会以“another embed layout”停下（用 `--check-only` 核对 2026-10-26 的运行时就是这样）。在你的 fork 的 Actions 页启用 Actions。推送到分支 `ios-windows-fixes` 的改动涉及 `games/totk/**` 或工作流文件时，工作流就会运行。工作流文件进了 fork 的默认分支后，也可以用“Run workflow”手动运行。下载这次运行的产物 `totk-ios-runtime`（保留 14 天）并解压一次，里面是 `TOTK-runtime.zip`。这个 zip 里有 `TOTK.app` 和 `TOTK-runtime.commit`，后者写着这次运行构建的提交，下一步从这里读取。这样不会有任何游戏内容传到 GitHub，也绝不能传：工作目录、种子、IPA 以及用它们编出的 Metal 库都不要提交，也不要上传。
 
-**4. 打包并签名：**
+**5. 打包并签名：**
 
 ```powershell
 python games/totk/ios/tools/package_ipa_windows.py <目录>/TOTK-runtime.zip --tree <工作目录>/totk --seed <种子工作目录>/seed --out <目录>/TOTK.ipa --p12 <证书.p12> --p12-password-file <密码文件> --profile <描述文件.mobileprovision> --zsign <zsign.exe>
 ```
 
-它把九个代码节写进运行时。每一节都要和布局文件里的大小、SHA-256 以及可执行文件自己的代码节哈希表核对。然后它加上游戏数据。bundle id 取自描述文件，显示名和图标取自旧 App。版本号和构建号沿用旧 App 的（试过的那个 App 是 1.4.3 和 2610.22.1）。最后用 zsign 签名并校验签名。`TOTK.ipa` 旁边还会写出 `TOTK-unsigned.ipa`（临时签名，给别的签名工具用）、`TOTK-shader-seed`（设备用的种子形式）和 `TOTK-package.json`。17 GB 的镜像和种子都不进 IPA（`--game-data documents`，默认）。Windows 上的 zsign 1.1.2 给 4 GiB 及以上的文件记下错误的哈希，所以在 Windows 上签名的 App 不能带镜像。`--game-data app` 把镜像和种子放进 App。它必须和 `--unsigned-only` 一起用，否则工具报错停下。两者一起用时，工具只写出未签名的 IPA，留给 Mac 签名。
+它把第 2 步的九个代码节写进运行时（`--sections <文件夹>` 改从别的文件夹取）。每一节都要和布局文件里的大小、SHA-256 以及可执行文件自己的代码节哈希表核对。加 `--check-only` 时工具做完这些核对就停：什么都不写，也不需要证书和 zsign，所以新下载的 `TOTK-runtime.zip` 先用它核对一遍。然后它加上游戏数据。bundle id 取自描述文件，显示名和图标取自旧 App。版本号和构建号沿用旧 App 的（试过的那个 App 是 1.4.3 和 2610.22.1）。最后用 zsign 签名并校验签名。`TOTK.ipa` 旁边还会写出 `TOTK-unsigned.ipa`（临时签名，给别的签名工具用）、`TOTK-shader-seed`（设备用的种子形式）和 `TOTK-package.json`。17 GB 的镜像和种子都不进 IPA（`--game-data documents`，默认）。Windows 上的 zsign 1.1.2 给 4 GiB 及以上的文件记下错误的哈希，所以在 Windows 上签名的 App 不能带镜像。`--game-data app` 把镜像和种子放进 App。它必须和 `--unsigned-only` 一起用，否则工具报错停下。两者一起用时，工具只写出未签名的 IPA，留给 Mac 签名。
 
 工具从 `TOTK-runtime.commit` 读出构建运行时的提交，并在第 3/6 步打印（“source commit: …”）。这个提交写进 `TOTK-package.json`；旧 App 的 `Info.plist` 里有 `TOTKSourceCommit` 这一项时，也写进这一项。`--source-commit <提交>` 可以手动指定提交，优先于这个文件。工作流开始写这个文件之前的 `TOTK-runtime.zip` 里没有它，这时工具记下当前检出的 HEAD 并打印警告，所以这样的运行时要用 `--source-commit` 给出那次运行构建的提交。在测试用的 Windows 电脑上（2026-10-26），第一次带种子打包约 8 分钟，同时写出设备用的种子文件夹（91,304 个文件，几乎都是指向种子的硬链接）。同一种子再打包不到 1 分钟。
 
-**5. 安装并复制游戏数据：**
+**6. 安装并复制游戏数据：**
 
 ```powershell
 python games/totk/ios/tools/push_device_windows.py deploy <目录>/TOTK.ipa --romfs <工作目录>/totk/extracted/v143/romfs/romfs.bin --backup-to <备份目录>

@@ -4,14 +4,14 @@ recover_ipa.py; standard library only.
 
 That app embeds each module as three sections (x0: the text as export-ios left it, W: the rest up to the patch area, x1:
 the patch area; gen_embed.py), and 30a1b93 compiled the loader's tables into it (_modules, _symbol_N, _reloc_N, _gate_N,
-the layouts of runtime/runtime.h). recover_module checks the sections as the app's loader and the repository's pins
-check them, makes the rewritten image again (sdk and subsdk0: x0 + W + x1 cut to the module size; main: its text with
-the game patches of 30a1b93's export-ios undone, EXPORT_SITES and ASPECT_SITES, and the veneers behind the text
-cleared), and accepts it only as the pinned rewrite. The image's symbols, relocations, constructor flag and init tags,
+the layouts of runtime/runtime.h). recover_module checks the sections as the app's loader checks them and against those
+of the app 30a1b93 built (APP_SECTIONS), makes the rewritten image again (sdk and subsdk0: x0 + W + x1 cut to the module
+size; main: its text with the game patches of 30a1b93's export-ios undone, EXPORT_SITES and ASPECT_SITES, and the
+veneers behind the text cleared), and accepts it only as the pinned rewrite. The image's symbols, relocations, constructor flag and init tags,
 made as scripts/prepare_runtime.py makes them, must be the app's; the gates, which the image does not hold, must each
 have its site branch into the patch area and its return address follow a blr x30. runtime_tables writes them with
 prepare_runtime.table_bytes."""
-import hashlib, json, re, struct, sys
+import hashlib, re, struct, sys
 from pathlib import Path
 
 TOOLS = Path(__file__).resolve().parent
@@ -47,7 +47,20 @@ EXPORT_SITES = {
 # first word is the site's own instruction (aspect_math.h aspect_stub).
 ASPECT_SITES = (0x628c74, 0xb43460, 0x1ff04f4, 0x253fbb0)
 ASPECT_STUBS, ASPECT_STUB = 48, 32
-EMBED_LAYOUT = TOOLS.parent / f'ci/embed-layout-{VERSION}.json'   # the pinned sections (gen_embed.py --layout-of)
+# The nine sections of the app 30a1b93 built, (name, part) -> (size, SHA-256), as gen_embed.py --layout-of gives them.
+# The runtime the ios-runtime workflow builds pins export_ios_windows.py's sections of the same rewrites instead
+# (ios/ci/embed-layout-v143.json): the same sizes, W and x1, and main's text with the patches added since 30a1b93.
+APP_SECTIONS = {
+    ('main', 'x0'): (45858816, '01df600a0d1da3d56bafbd33cf26a843067e4e9c568d2655e5644d21652b228a'),
+    ('main', 'w'): (15941632, '2c10022fd1d89785ec620f695ca4acd1d7d1feae20e9622b73ea521670100e5a'),
+    ('main', 'x1'): (10502144, '9406ec53f3d778d426f7f198cda53eb37046994c2dcd12a674fa034bb9a142d2'),
+    ('subsdk0', 'x0'): (3506176, '70f014733c7d72aefbf4ec8461948ef697ee174805420a1f35c60726d69b3b15'),
+    ('subsdk0', 'w'): (3244032, '0abf7c6f9e4c883b24db896b3e7ade3d555a1e0e95f102501724051ee5932f6a'),
+    ('subsdk0', 'x1'): (409600, '1f3d3b15b14e2eeb5eca16b0d18c3d5c1b6498b9fa3fb7d38573db99ef2d4fa7'),
+    ('sdk', 'x0'): (6701056, '0b78c4a70546f5f4d800934439ac4fadd17bfc394301ff3945499d464e0501d9'),
+    ('sdk', 'w'): (6275072, 'cdc7754ef82d594a6989c00b533766631017f2ef71f575ef4fd28986218f6769'),
+    ('sdk', 'x1'): (1441792, '63c334048e97ff6cd0194af2c56638e08eaf70725bd1ed23731713f4ef9caa41'),
+}
 
 
 class RecoverError(Exception):
@@ -79,13 +92,9 @@ def branch_target(word, pc):
     return pc + ((imm ^ 0x2000000) - 0x2000000) * 4
 
 
-def section_pins():
-    """(name, part) -> (size, SHA-256) of the sections ios/ci/embed-layout-<version>.json pins, {} without that file."""
-    try:
-        modules = json.loads(EMBED_LAYOUT.read_text())['modules']
-    except OSError:
-        return {}
-    return {(m['name'], part): (m[part]['size'], m[part]['sha256']) for m in modules for part in ('x0', 'w', 'x1')}
+def layout_pins(layout):
+    """(name, part) -> (size, SHA-256) of a layout gen_embed.py --layout-of wrote (its JSON, read)."""
+    return {(m['name'], part): (m[part]['size'], m[part]['sha256']) for m in layout['modules'] for part in ('x0', 'w', 'x1')}
 
 
 def old_modules(exe):
@@ -222,18 +231,18 @@ def probe_stub(image, text_end, slot):
     return found[0]
 
 
-def recover_module(exe, m, embed, pins, pin):
-    """One module's three sections, checked against the app's ios_embed hashes (embed) and the layout's pins (pins, {}
-    without the layout), and the rewritten image made from them, which must be pin; the image's tables must be the
-    app's. Returns the image, the sections, the sites put back and the image's own tables."""
+def recover_module(exe, m, embed, pin):
+    """One module's three sections, checked against the app's ios_embed hashes (embed) and APP_SECTIONS, and the
+    rewritten image made from them, which must be pin; the image's tables must be the app's. Returns the image, the
+    sections, the sites put back and the image's own tables."""
     name = m['name']
     require(m['digest'] == pin, f'{name}: the app was built for the rewrite {m["digest"][:16]}..., this repository pins {pin[:16]}...')
     parts = {part: exe.section_bytes(*key) for part, key in macho.module_sections(name).items()}
     check_layout(m, parts['x0'], parts['w'], parts['x1'])
     for part, data in parts.items():
         require(digest(data) == embed[name][part], f'{name} {part}: the section is not what the app\'s _ios_embed names')
-        require(not pins or pins.get((name, part)) == (len(data), digest(data)),
-                f'{name} {part}: the section is not the one {EMBED_LAYOUT.name} pins')
+        require(APP_SECTIONS.get((name, part)) == (len(data), digest(data)),
+                f'{name} {part}: the section is not the one the app 30a1b93 built has (APP_SECTIONS)')
     text, restored = restore_main_text(parts['x0'], m) if name == 'main' else (parts['x0'], [])
     image = (text + parts['w'] + parts['x1'])[:m['file_size']]
     require(digest(image) == pin, f'{name}: the module made from the app\'s sections ({len(restored)} patch sites put back) '

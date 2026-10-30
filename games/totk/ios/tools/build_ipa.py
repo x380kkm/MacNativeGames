@@ -7,7 +7,10 @@ shader list and the add-on content beside the RomFS).
 the module sections are zero-filled to the layout's sizes and carry its hashes (gen_embed.py --layout), no step reads the
 game's files or runs the Mac game binary (no export-ios, game data, shader seed, pipeline archive or icon), and the
 Settings pane gets its languages as in a full build. The tree is then games/totk itself, and the output a .app folder;
-the module bytes are written into the executable on the machine that holds them (.github/workflows/ios-runtime.yml)."""
+the module bytes are written into the executable on the machine that holds them (.github/workflows/ios-runtime.yml).
+The device checks the game patches in those bytes at start, so the layout names sections exported with this
+repository's patches: ios/ci/embed-layout-v143.json is gen_embed.py --layout-of of ios/tools/export_ios_windows.py's
+export."""
 import argparse, hashlib, json, os, plistlib, shutil, subprocess, sys, time
 from pathlib import Path
 from compile_seed import METAL_FLAGS

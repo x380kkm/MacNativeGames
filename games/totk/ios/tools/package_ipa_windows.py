@@ -6,14 +6,16 @@ signed with zsign. build_ipa.py and install_device.py do this on a Mac with Xcod
   python package_ipa_windows.py <TOTK-runtime.zip | TOTK.app> --tree <work>/totk --out <dir>/<name>.ipa
          --p12 <certificate.p12> --p12-password-file <file> --profile <profile.mobileprovision> [--zsign <zsign.exe>]
          [--seed <seed folder> [--metallibs <folder>]] [--source-commit <commit>] [--game-data documents | app]
-         [--unsigned-only]
+         [--sections <folder>] [--unsigned-only]
+  python package_ipa_windows.py <TOTK-runtime.zip | TOTK.app> --tree <work>/totk --check-only [--sections <folder>]
 
 The runtime: the ios-runtime workflow's artifact TOTK-runtime.zip, or the TOTK.app in it (build_ipa.py --runtime-only
 --embed-layout ios/ci/embed-layout-v143.json). Its nine module sections (x0, W and x1 of main, subsdk0 and sdk, as
 gen_embed.py names them) are zero-filled to the sizes of the layout, or already hold the modules. Each is filled from
-the work folder's <tree>/build/from-ipa/embed/<module>.<part>.bin (recover_ipa.py) at its file offset; every section
-file must match the layout's size and SHA-256, and so must the executable's own ios_embed table (loader.c checks the
-sections against it at start).
+<tree>/build/export-ios/<module>.<part>.bin (export_ios_windows.py: the pinned rewrites with the game patches written
+in; --sections names another folder) at its file offset; every section file must match the layout's size and SHA-256,
+and so must the executable's own ios_embed table (loader.c checks the sections against it at start). --check-only makes
+these checks and stops: it writes nothing and needs no signing identity.
 
 The app: the runtime's own files and Info.plist (xcodegen made it from ios/project.yml), then the keys of the app the
 device has (<old app>/Info.plist) that the runtime's lacks, Xcode's build keys (DT*, BuildMachineOSBuild) excepted, so
@@ -52,6 +54,7 @@ REPO = GAME.parents[1]
 sys.path.insert(0, str(TOOLS))
 sys.path.insert(0, str(REPO))
 import build_app                    # noqa: E402  sha256 and say, as the Mac build prints them
+from export_ios_windows import EXPORT_DIR   # noqa: E402  where the sections are in the work folder
 import macho                        # noqa: E402  the executable's sections and ios_embed table
 import seed_windows                 # noqa: E402  the seed's device form
 import sign_ipa_windows as signing  # noqa: E402
@@ -102,9 +105,11 @@ def fill_sections(exe, sections_dir, layout):
     for (name, part), (size, sha) in pins.items():
         require(embed[name][part] == sha, f'{name} {part}: the runtime was built for {embed[name][part][:16]}..., '
                 f'the layout pins {sha[:16]}... (another embed layout)')
-        data = (sections_dir/f'{name}.{part}.bin').read_bytes()
+        path = sections_dir/f'{name}.{part}.bin'
+        require(path.is_file(), f'{path}: no such section file (export_ios_windows.py writes the sections)')
+        data = path.read_bytes()
         require(len(data) == size and digest(data) == sha,
-                f'{sections_dir/f"{name}.{part}.bin"}: not the section the layout pins (run recover_ipa.py again)')
+                f'{path}: not the section the layout pins (export_ios_windows.py makes the sections again)')
         seg, sect = macho.module_sections(name)[part]
         require((seg, sect) in image.sections, f'the runtime has no {seg},{sect} section')
         at, have = image.sections[(seg, sect)]
@@ -169,6 +174,17 @@ def zipped_app(z, runtime):
     plists = [n for n in z.namelist() if re.fullmatch(r'(?:Payload/)?[^/]+\.app/Info\.plist', n)]
     require(len(plists) == 1, f'{runtime}: not one <name>.app in the archive')
     return plists[0][:-len('Info.plist')]
+
+
+def runtime_executable(runtime):
+    """The executable of the runtime (TOTK-runtime.zip, or a TOTK.app folder), read in place."""
+    if runtime.is_dir():
+        require((runtime/'Info.plist').is_file(), f'{runtime}: not an app folder (no Info.plist)')
+        return (runtime/plistlib.loads((runtime/'Info.plist').read_bytes())['CFBundleExecutable']).read_bytes()
+    require(zipfile.is_zipfile(runtime), f'{runtime}: neither TOTK-runtime.zip nor a TOTK.app folder')
+    with zipfile.ZipFile(runtime) as z:
+        prefix = zipped_app(z, runtime)
+        return z.read(prefix + plistlib.loads(z.read(prefix + 'Info.plist'))['CFBundleExecutable'])
 
 
 def unpack_runtime(runtime, app):
@@ -263,7 +279,10 @@ def arguments():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('runtime', type=Path, help='the ios-runtime workflow\'s TOTK-runtime.zip, or the TOTK.app folder in it')
     p.add_argument('--tree', type=Path, required=True, help='the work folder of the game (recover_ipa.py --out)')
-    p.add_argument('--out', type=Path, required=True, help='the signed IPA to write (<name>.ipa)')
+    p.add_argument('--out', type=Path, help='the signed IPA to write (<name>.ipa); not with --check-only')
+    p.add_argument('--sections', type=Path, help=f'the nine module sections (default: <tree>/{EXPORT_DIR}, export_ios_windows.py)')
+    p.add_argument('--check-only', action='store_true', help='check the runtime and the sections against the layout, '
+                   'write nothing')
     p.add_argument('--game-data', choices=('documents', 'app'), default='documents',
                    help='documents (default): romfs.bin and the seed stay out of the app; app: both go into it')
     p.add_argument('--seed', type=Path, help='the shader seed folder (prepare_shader_seed.py --output, seed_windows.py seed)')
@@ -302,14 +321,24 @@ def identity_of(a, old_info):
             'CFBundleShortVersionString': short, 'CFBundleVersion': build}, ident
 
 
-def assemble(a, runtime, tree, app, old_app, old_info, identity):
+def check_only(runtime, sections, layout_path):
+    """--check-only: fill_sections on a copy of the runtime's executable, which is then dropped."""
+    say(f'runtime: {runtime} (built from {runtime_commit(runtime) or "a commit it does not name"})')
+    say(f'sections: {sections}, layout: {layout_path}')
+    layout = json.loads(layout_path.read_text())
+    for name, part, state in fill_sections(bytearray(runtime_executable(runtime)), sections, layout):
+        print(f'  {name} {part}: {"to be written" if state == "written" else state}')
+    say('the runtime and the sections fit the layout; nothing written (--check-only)')
+
+
+def assemble(a, runtime, sections, app, old_app, old_info, identity):
     """The app folder from the runtime: sections written, its files, Info.plist. Returns what the report records."""
     runtime_info = unpack_runtime(runtime, app)
     exe_name = runtime_info['CFBundleExecutable']
     require(not (app/'GameData').exists(), f'{runtime} carries GameData already: give the runtime alone')
     exe = bytearray((app/exe_name).read_bytes())
-    say('2/6 module sections into the executable')
-    filled = fill_sections(exe, tree/'build/from-ipa/embed', json.loads(a.layout.read_text()))
+    say(f'2/6 module sections into the executable, from {sections}')
+    filled = fill_sections(exe, sections, json.loads(a.layout.read_text()))
     (app/exe_name).write_bytes(exe)
     for name, part, state in filled:
         print(f'  {name} {part}: {state}')
@@ -326,8 +355,8 @@ def assemble(a, runtime, tree, app, old_app, old_info, identity):
     info = app_info(runtime_info, old_info, identity, with_icons, build)
     (app/'Info.plist').write_bytes(plistlib.dumps(info, fmt=plistlib.FMT_BINARY))
     return dict(runtime=str(runtime), executable=exe_name, executable_sha256=digest(exe),
-                sections={f'{n}.{p}': s for n, p, s in filled}, shader_chain=runtime_chain(exe), source_commit=commit,
-                source_commit_from=commit_from,
+                sections_from=str(sections), sections={f'{n}.{p}': s for n, p, s in filled}, shader_chain=runtime_chain(exe),
+                source_commit=commit, source_commit_from=commit_from,
                 info_from_old_app=sorted(k for k in info if k not in runtime_info and k not in identity),
                 info={k: info.get(k) for k in ('CFBundleIdentifier', 'CFBundleShortVersionString', 'CFBundleVersion',
                                                'CFBundleDisplayName', 'MinimumOSVersion', 'DTSDKName')})
@@ -335,7 +364,12 @@ def assemble(a, runtime, tree, app, old_app, old_info, identity):
 
 def main():
     a = arguments()
-    tree, out, runtime = a.tree.resolve(), a.out.resolve(), a.runtime.resolve()
+    tree, runtime = a.tree.resolve(), a.runtime.resolve()
+    sections = (a.sections or tree/EXPORT_DIR).resolve()
+    if a.check_only:
+        return check_only(runtime, sections, a.layout)
+    require(a.out, 'give --out (or --check-only)')
+    out = a.out.resolve()
     require(out.suffix.lower() == '.ipa', '--out must end in .ipa')
     require(a.game_data == 'documents' or a.seed, '--game-data app needs --seed: the app has no shaders otherwise')
     require(a.seed or not a.metallibs, '--metallibs goes with --seed')
@@ -353,7 +387,7 @@ def main():
     app = staging/'Payload/TOTK.app'
     say(f'1/6 runtime: {runtime}')
     report = dict(tool='games/totk/ios/tools/package_ipa_windows.py', made=datetime.datetime.now().isoformat(timespec='seconds'),
-                  **assemble(a, runtime, tree, app, old_app, old_info, identity), tree=str(tree), game_data=a.game_data)
+                  **assemble(a, runtime, sections, app, old_app, old_info, identity), tree=str(tree), game_data=a.game_data)
     say(f'4/6 game data ({a.game_data})')
     report['game_data_files'] = game_data(tree, app/'GameData', a.game_data)
     seed_out = None
