@@ -235,7 +235,10 @@ static NSDictionary *pref_row(NSDictionary *root, NSString *key) {
 static void apply_operation_mode(const char *mode) {
     setenv("TOTK_OPERATION_MODE", mode, 1);
 }
-/* overwrite: the custom layer owns its keys (1); the presets keep a devicectl value in place (0) and never clear. */
+/* overwrite 1: the caller owns the keys, sets them and clears the one its value leaves unset, so a value from the launch
+   environment goes too: the custom layer at launch, and the presets when the game starts (apply_display_settings), which
+   has to replace what apply_settings handed over for the start screen's pick to count. overwrite 0: the presets' hand-over
+   in apply_settings, which neither replaces nor clears. */
 static void apply_frame_env(const totk_frame_env *e, int overwrite) {
     if (e->present_hz) setenv("DM_PRESENT_HZ", e->present_hz, overwrite);
     else if (overwrite) unsetenv("DM_PRESENT_HZ");
@@ -247,8 +250,9 @@ static void apply_frame_env(const totk_frame_env *e, int overwrite) {
 /* The presets' picture and frame rate, from the rows the Settings app and the start screen (start_screen.m) write;
    applied once, just before the game thread starts, so the start screen's pick counts (after PR #433: applying them in
    didFinishLaunching as well left a 1080 drawable behind when the start screen then turned Full HD off). The picture keys
-   keep a devicectl value (overwrite=0), as before the pane had layers. The custom layer was handed over in apply_settings
-   and the start screen does not write its rows, so it is left as it is. The mapping is settings_map.c's. */
+   keep a devicectl value (overwrite=0), as before the pane had layers; the frame keys follow the row. The custom layer was
+   handed over in apply_settings and the start screen does not write its rows, so it is left as it is. The mapping is
+   settings_map.c's. */
 static void apply_display_settings(void) {
     NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
     if ([d boolForKey:@"TOTK_CUSTOM_PICTURE"]) return;
