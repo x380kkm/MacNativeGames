@@ -161,7 +161,8 @@ request not mapped with its offsets and size (the first 8).
 
 `TOTK_VPOOL_UNALIGNED=0` refuses such a pool again, which fails its initialization and the whole mapping call. On iPhone and
 iPad, Settings › Apps › Tears of the Kingdom › Graphics troubleshooting › Unaligned memory pool › Off sets it.
-`TOTK_VPOOL_UNALIGNED=1` turns the new behaviour on on the Mac, where the default stays as it was.
+`TOTK_VPOOL_UNALIGNED=1` turns the new behaviour on on the Mac, where the default stays as it was. A Breath of the Wild
+build leaves this off by default, and its Settings pane has no such row; `TOTK_VPOOL_UNALIGNED=1` turns it on there.
 
 None of this has run on a device, so its effect in the game is untested. `TOTK_VPOOL_UNALIGNED=1 make -C games/totk probe-vpool`
 covers the path with the switch on; without the variable the probe checks the refusal. It needs a Mac and the `rewritten/v0`
@@ -200,7 +201,8 @@ render pass, and the completion handler of the submission sums the slots and wri
 
 An occlusion query only saves work: a wrong "visible" costs GPU time, a wrong "hidden" takes an object out of the picture.
 So on iPhone and iPad a report nobody can vouch for reads 1, the smallest count that is not "hidden". The game culls on
-zero or non-zero, and a light it scales by the count stays dark. Two kinds of report are raised:
+zero or non-zero, and a light it scales by the count stays dark. A Breath of the Wild build leaves this off by default, and
+its Settings pane has no such row; `TOTK_OCCL_GUARD=1` turns it on there. Two kinds of report are raised:
 
 - a report not known to be complete: a counted draw never reached its counter (its shader, pipeline, pass or counter slot
   was missing), or a command buffer of the submission failed. A failed chunk is found by its fence, which relies on its
