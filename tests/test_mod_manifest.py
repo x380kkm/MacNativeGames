@@ -314,6 +314,48 @@ class MergeWithBuildPatch(unittest.TestCase):
         self.assertIn('replaces or adds no file', result.stderr)
         self.assertFalse((self.mod/(COMMON + '.mod-original')).exists())
 
+    def assert_stops(self, *expected):
+        """The run ended with exit code 1 and one line of errors, which holds `expected`, and wrote no manifest."""
+        result = run(self.mod, '--romfs', self.romfs)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(len(result.stderr.strip().splitlines()), 1, result.stderr)
+        for text in ('nothing written: ', *expected):
+            self.assertIn(text, result.stderr)
+        self.assertFalse((self.mod/'manifest.tsv').exists())
+
+    def test_a_damaged_mod_file_ends_in_one_line_and_stays_where_it_is(self):
+        (self.mod/COMMON).parent.mkdir(parents=True)
+        for raw in (self.pack(self.original)[:40], self.pack(b'not a SARC ' * 40), b'not zstd at all'):
+            with self.subTest(raw=raw[:6]):
+                (self.mod/COMMON).write_bytes(raw)
+                self.assert_stops(f'{COMMON}: the mod\'s file is not a readable archive')
+                self.assertEqual((self.mod/COMMON).read_bytes(), raw)
+                self.assertFalse((self.mod/(COMMON + '.mod-original')).exists())
+
+    def test_a_damaged_kept_copy_is_named(self):
+        (self.mod/COMMON).parent.mkdir(parents=True)
+        kept = self.mod/(COMMON + '.mod-original')
+        kept.write_bytes(self.pack(self.original)[:40])
+        self.assert_stops(f'{COMMON}: {kept.name} is not a readable archive')
+
+    def test_a_damaged_build_overlay_is_named(self):
+        self.put_mod({**self.members, 'timg/__Combined.bntx': b'translated textures' * 40})
+        cut = self.build[:40]
+        overlay = self.romfs.parent/'romfs-patches'
+        (overlay/COMMON).write_bytes(cut)
+        (overlay/'manifest.tsv').write_text('\t'.join([COMMON, str(len(cut)), hashlib.sha256(cut).hexdigest(), '-']) + '\n')
+        self.assert_stops(f'{COMMON}: the build\'s file is not a readable archive')
+
+    def test_a_damaged_romfs_is_named(self):
+        image = self.romfs/'romfs.bin'
+        (self.mod/COMMON).parent.mkdir(parents=True)
+        (self.mod/(COMMON + '.mod-original')).write_bytes(self.pack(self.original))
+        whole = image.read_bytes()
+        image.write_bytes(whole[:10])
+        self.assert_stops('Pack/ZsDic.pack.zs', 'RomFS image ends early')
+        image.write_bytes(bytes(len(whole)))
+        self.assert_stops('Pack/ZsDic.pack.zs', 'not a readable zstd frame')
+
 
 class TheWriterToolsShare(unittest.TestCase):
     """make_button_icons.py writes a mod's manifest with write_manifest() - it used to unpack manifest()'s return into

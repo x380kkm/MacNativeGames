@@ -29,6 +29,7 @@ SWORD, EVENT_SWORD, TORCH = ('Pack/Actor/Weapon_Sword_001.pack.zs', 'Pack/Actor/
                              'Pack/Actor/Npc_Torch.pack.zs')
 BUCKLER, ENEMY, PLAYER = 'Pack/Actor/Weapon_Shield_001.pack.zs', 'Pack/Actor/Enemy_Bokoblin.pack.zs', 'Pack/Actor/Player.pack.zs'
 BOOTUP, TABLE = 'Pack/Bootup.Nin_NX_NVN.pack.zs', 'RSDB/GameActorInfo.Product.143.rstbl.byml.zs'
+COMMON = 'UI/LayoutArchive/Common.Product.140.Nin_NX_NVN.blarc.zs'
 WEAPONS = (SWORD, EVENT_SWORD, TORCH, BUCKLER)
 
 
@@ -45,7 +46,7 @@ class Fixture(unittest.TestCase):
         import romfs_formats
         from romfs_fixtures import byml, zstd_dictionary
         from test_mod_manifest import fake_romfs, sarc
-        cls.formats, cls.sarc = romfs_formats, staticmethod(sarc)
+        cls.formats, cls.sarc, cls.byml = romfs_formats, staticmethod(sarc), staticmethod(byml)
         cls.top = tempfile.TemporaryDirectory()
         dictionaries = {1: zstd.ZstdDict(zstd_dictionary(1)), 3: zstd.ZstdDict(zstd_dictionary(3))}
         cls.dictionaries = dictionaries
@@ -88,9 +89,26 @@ class Fixture(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def run_tool(self, *args):
-        return subprocess.run([sys.executable, str(SCRIPT), '--romfs', str(self.romfs), *map(str, args)],
+    def run_tool(self, *args, romfs=None):
+        return subprocess.run([sys.executable, str(SCRIPT), '--romfs', str(romfs or self.romfs), *map(str, args)],
                               capture_output=True, text=True)
+
+    def assert_one_line(self, result, *expected):
+        """The run ended with exit code 1 and one line of errors, which holds `expected`."""
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(len(result.stderr.strip().splitlines()), 1, result.stderr)
+        for text in expected:
+            self.assertIn(text, result.stderr)
+
+    def stored(self, data, dictionary=3):
+        """`data` as the RomFS stores a file, compressed with the zstd dictionary of that id."""
+        import compression.zstd as zstd
+        return zstd.compress(data, level=3, zstd_dict=self.dictionaries[dictionary])
+
+    def romfs_with(self, changes, folder='romfs'):
+        """A RomFS in this test's folder: the fixture's files with the files of `changes` replaced, or left out for None."""
+        from test_mod_manifest import fake_romfs
+        return fake_romfs(self.root/folder, {path: raw for path, raw in {**self.files, **changes}.items() if raw is not None})
 
     def tune(self, *args, mod=None):
         result = self.run_tool('--into', mod or self.mod, *args)
@@ -184,6 +202,13 @@ class Edits(Fixture):
         self.assertEqual(tool.tuned('durability', 0, tool.Tuning(durability=5)), 0)
         self.assertEqual(tool.tuned('durability', 0, tool.Tuning()), 0)
 
+    def test_a_table_row_without_a_name_or_maxlife_stays(self):
+        table = self.byml([{'Category': 'Sword'}, {'__RowId': 'Weapon_Sword_001', 'Category': 'Sword'}])
+        result = self.run_tool('--into', self.mod, '--durability', 5, romfs=self.romfs_with({TABLE: self.stored(table, 1)}))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.written(), sorted(WEAPONS))
+        self.assertEqual(self.life(SWORD), 100)
+
     def test_the_summary_says_what_changed(self):
         out = self.tune('--durability', 5, '--battery-drain', 4)
         self.assertIn('maximum durability x5: 8 of 8 values changed (packs: 4, table rows: 4), 12..20 -> 60..100', out)
@@ -195,6 +220,11 @@ class Edits(Fixture):
         # -I leaves the script's own folder off the path, where its two modules are
         result = subprocess.run([sys.executable, '-I', str(SCRIPT), '--romfs', str(self.romfs), '--into', str(self.mod),
                                  '--durability', '2'], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.life(SWORD), 40)
+
+    def test_romfs_may_name_the_image_itself(self):
+        result = self.run_tool('--into', self.mod, '--durability', 2, romfs=self.romfs/'romfs.bin')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.life(SWORD), 40)
 
@@ -228,6 +258,12 @@ class Manifest(Fixture):
         record = json.loads((self.mod/'.gameplay-tuning.json').read_text(encoding='utf-8'))
         self.assertEqual((record['durability'], record['battery_drain'], record['battery_recharge']), (5, 3, 1))
         self.assertNotIn('.gameplay-tuning.json', self.manifest())
+
+    def test_a_misspelt_path_writes_no_manifest(self):
+        extra = self.mod/'Sound/other.bwav'; extra.parent.mkdir(parents=True); extra.write_bytes(b'wrong case')
+        result = self.run_tool('--into', self.mod, '--durability', 5)
+        self.assert_one_line(result, 'manifest not written', 'Sound/other.bwav (the RomFS has Sound/Other.bwav)')
+        self.assertFalse((self.mod/'manifest.tsv').exists())
 
     def test_the_manifest_ends_with_lf(self):
         self.tune('--durability', 2)
@@ -362,6 +398,53 @@ class Slots(Fixture):
         self.assertFalse((mods/'v143-strong/stale.bin').exists())
         self.assertEqual(sorted(p.name for p in mods.iterdir() if p.name.startswith('.')), [])
 
+    def test_a_run_clears_what_a_stopped_run_left(self):
+        mods = self.build()
+        for leftover in (mods/'.v143-strong.new', mods/'.v143-strong.old'):
+            leftover.mkdir()
+            (leftover/'stale.bin').write_bytes(b'left from a stopped run')
+        self.build()
+        self.assertFalse((mods/'v143-strong/stale.bin').exists())
+        self.assertEqual(self.life(SWORD, folder=mods/'v143-strong'), 100)
+        self.assertEqual(sorted(p.name for p in mods.iterdir() if p.name.startswith('.')), [])
+
+    def test_a_run_finishes_one_stopped_between_its_two_renames(self):
+        mods = self.build()
+        (mods/'v143-strong').rename(mods/'.v143-strong.old')
+        self.build()
+        self.assertEqual(self.life(SWORD, folder=mods/'v143-strong'), 100)
+        self.assertEqual(sorted(p.name for p in mods.iterdir() if p.name.startswith('.')), [])
+
+    def test_the_version_names_the_folders(self):
+        import make_gameplay_tuning as tool
+        result = self.run_tool('--slots', self.root/'mods', '--base', self.base(), '--version', 'v121')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(sorted(p.name for p in (self.root/'mods').iterdir()), sorted(f'v121-{slot}' for slot in tool.SLOTS))
+
+    def romfs_with_build_overlay(self):
+        """A RomFS holding the UI archive, and beside it the build's overlay, which replaces that archive too: the RomFS and
+        the archive as stored."""
+        archive = self.stored(self.sarc({'timg/__Combined.bntx': b'textures ' * 40}))
+        overlay = self.root/'romfs-patches'
+        (overlay/COMMON).parent.mkdir(parents=True)
+        (overlay/COMMON).write_bytes(archive)
+        (overlay/'manifest.tsv').write_text('\t'.join([COMMON, str(len(archive)), hashlib.sha256(archive).hexdigest(), '-']) + '\n',
+                                            encoding='utf-8', newline='\n')
+        return self.romfs_with({COMMON: archive}), archive
+
+    def test_a_damaged_ui_archive_in_a_mod_folder_ends_in_one_line(self):
+        romfs, archive = self.romfs_with_build_overlay()
+        base = self.base()
+        for raw in (archive[:40], self.stored(b'not a SARC ' * 40)):
+            with self.subTest(raw=raw[:6]):
+                for folder in (base, self.mod):
+                    (folder/COMMON).parent.mkdir(parents=True, exist_ok=True)
+                    (folder/COMMON).write_bytes(raw)
+                for result in (self.run_tool('--slots', self.root/'mods', '--base', base, romfs=romfs),
+                               self.run_tool('--into', self.mod, '--durability', 2, romfs=romfs)):
+                    self.assert_one_line(result, f'manifest not written: {COMMON}: the mod\'s file is not a readable archive')
+                self.assertFalse((self.root/'mods/v143-off').exists())
+
     def test_a_folder_this_tool_did_not_make_stops_the_run(self):
         mods = self.root/'mods'; (mods/'v143-strong').mkdir(parents=True)
         (mods/'v143-strong/mine.bin').write_bytes(b'the player\'s')
@@ -408,13 +491,8 @@ class Slots(Fixture):
 
 class DamagedRomfs(Fixture):
     """A damaged RomFS ends the run with one line that says what is wrong, and the mod folder is not made."""
-    def assert_stops(self, romfs, *expected):
-        result = subprocess.run([sys.executable, str(SCRIPT), '--romfs', str(romfs), '--into', str(self.mod), '--durability', '5'],
-                                capture_output=True, text=True)
-        self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertEqual(len(result.stderr.strip().splitlines()), 1, result.stderr)
-        for text in expected:
-            self.assertIn(text, result.stderr)
+    def assert_stops(self, romfs, *expected, args=('--durability', 5)):
+        self.assert_one_line(self.run_tool('--into', self.mod, *args, romfs=romfs), *expected)
         self.assertFalse(self.mod.exists())
 
     def romfs_copy(self):
@@ -439,10 +517,42 @@ class DamagedRomfs(Fixture):
         self.assert_stops(romfs, 'Pack/ZsDic.pack.zs', 'not a readable zstd frame')
 
     def test_a_member_too_short_to_read_names_its_pack(self):
-        import compression.zstd as zstd
-        from test_mod_manifest import fake_romfs
-        cut = zstd.compress(self.sarc({CONDITION: b'YB\x07\0'}), level=3, zstd_dict=self.dictionaries[3])
-        self.assert_stops(fake_romfs(self.root/'romfs', {**self.files, PLAYER: cut}), PLAYER)
+        cut = self.stored(self.sarc({CONDITION: b'YB\x07\0'}))
+        self.assert_stops(self.romfs_with({PLAYER: cut}), PLAYER)
+
+    def test_a_romfs_without_the_dictionary_pack_is_not_this_games(self):
+        self.assert_stops(self.romfs_with({'Pack/ZsDic.pack.zs': None}), 'holds no Pack/ZsDic.pack.zs')
+
+    def test_a_romfs_with_no_value_for_a_setting_is_not_this_games(self):
+        no_weapons = dict.fromkeys((*WEAPONS, TABLE))
+        self.assert_stops(self.romfs_with(no_weapons), 'holds no value for: durability')
+        self.assert_stops(self.romfs_with({PLAYER: None}, 'no-player'), 'holds no value for: drain, recharge',
+                          args=('--battery-drain', 2, '--battery-recharge', 2))
+
+    def test_a_setting_left_as_it_is_needs_no_value(self):
+        result = self.run_tool('--into', self.mod, '--durability', 5, romfs=self.romfs_with({PLAYER: None}))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('battery drain /1: no such value in this RomFS', result.stdout)
+
+    def test_a_pack_that_is_not_a_sarc_names_its_file(self):
+        self.assert_stops(self.romfs_with({SWORD: self.stored(b'not a SARC ' * 40)}), SWORD, 'AssertionError')
+
+    def test_a_life_member_without_maxlife_names_its_pack(self):
+        pack = self.stored(self.sarc({LIFE: self.byml({'UseBreakLife': False})}))
+        self.assert_stops(self.romfs_with({SWORD: pack}), SWORD, "KeyError('MaxLife')")
+
+    def test_a_member_whose_root_lies_past_its_end_names_its_pack(self):
+        member = b'YB' + struct.pack('<HIII', 7, 0, 0, 0x1000)
+        self.assert_stops(self.romfs_with({SWORD: self.stored(self.sarc({LIFE: member}))}), SWORD, 'IndexError')
+
+    def test_a_value_of_another_kind_names_its_file(self):
+        rates = self.byml({'ZonauEnergy_CostRate': [1, 2], 'ZonauEnergy_HealRate': [1.0]})
+        rows = self.byml([{'__RowId': 'Weapon_Sword_001', 'MaxLife': 20.0}])
+        cases = ((PLAYER, self.stored(self.sarc({CONDITION: rates})), 'ZonauEnergy_CostRate holds kind'),
+                 (TABLE, self.stored(rows, 1), 'MaxLife holds kind'))
+        for number, (path, raw, text) in enumerate(cases):
+            with self.subTest(path):
+                self.assert_stops(self.romfs_with({path: raw}, f'romfs{number}'), path, text)
 
 
 if __name__ == '__main__':

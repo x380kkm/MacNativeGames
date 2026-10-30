@@ -300,7 +300,7 @@ def changes_original(name, mod, romfs, index):
 def merge_build_patch(mod, name, romfs, index, folder, build_sha):
     """Apply the build's edit (make_romfs_patches.py) to the mod's copy of the UI archive `name` and write the result in its
     place; the mod's own file is kept as <name>.mod-original. False when the mod's file is the original (nothing to merge);
-    raises ValueError when the two can't be merged."""
+    raises ValueError when the two can't be merged, or when a copy of the archive is damaged, which it then names."""
     target, kept = mod/name, mod/(name + KEPT)
     if name not in index:      # the build adds this file rather than replacing one: nothing to merge with
         return False
@@ -314,6 +314,7 @@ def merge_build_patch(mod, name, romfs, index, folder, build_sha):
     except ImportError:
         raise ValueError(f'{name}: merging it with the build\'s patch needs Python 3.14 (compression.zstd)') from None
     from make_romfs_patches import MEMBERS, common_archive, patch_capture, sarc_members
+    from romfs_formats import UNREADABLE, ZSDIC_PACK, zstd_dictionaries
     if name not in {common_archive(v) for v in VERSIONS}:
         raise ValueError(f'{name}: the build patches this file too, and only the UI archive Common.Product.<n> can be merged; '
                          'leave it out of the mod')
@@ -322,28 +323,38 @@ def merge_build_patch(mod, name, romfs, index, folder, build_sha):
         raise ValueError(f'{folder/name} does not match the build\'s manifest')
     with image_file(romfs).open('rb') as image:
         def read(path):
-            offset, size = index[path]; image.seek(offset); data = image.read(size); assert len(data) == size; return data
-        pack = zstd.decompress(read('Pack/ZsDic.pack.zs'))
+            offset, size = index[path]; image.seek(offset); data = image.read(size)
+            if len(data) != size:
+                raise ValueError('RomFS image ends early')
+            return data
+        try:
+            dictionaries = zstd_dictionaries(read(ZSDIC_PACK))
+        except UNREADABLE as error:
+            raise ValueError(f'{ZSDIC_PACK}: {error!r}') from error
         original_raw = read(name)
-    dictionaries = {}
-    for lo, hi in sarc_members(pack).values():
-        d = zstd.ZstdDict(pack[lo:hi]); dictionaries[d.dict_id] = d
     def unpack(raw):
         info = zstd.get_frame_info(raw)
         if info.dictionary_id and info.dictionary_id not in dictionaries:
-            raise ValueError(f'{name}: compressed with a zstd dictionary the game does not have')
+            raise ValueError('compressed with a zstd dictionary the game does not have')
         return bytearray(zstd.decompress(raw, zstd_dict=dictionaries[info.dictionary_id]) if info.dictionary_id else zstd.decompress(raw))
-    original, build = unpack(original_raw), unpack(build_raw)
-    om, bm = sarc_members(original), sarc_members(build)
+    def archive(raw, copy):
+        """The SARC in the zstd file `raw` and its members; `copy` says in an error which copy of `name` the file is."""
+        try:
+            data = unpack(raw)
+            return data, sarc_members(data)
+        except UNREADABLE as error:
+            raise ValueError(f'{name}: {copy} is not a readable archive: {error!r}') from error
+    original, om = archive(original_raw, 'the RomFS original')
+    build, bm = archive(build_raw, 'the build\'s file')
     if any(original[slice(*om[k])] != build[slice(*bm[k])] for k in om if k not in MEMBERS) or om.keys() != bm.keys():
         raise ValueError(f'{name}: the build\'s patch changes more than {", ".join(MEMBERS)}; this tool merges only those')
     if target.is_file():   # the mod's own file, unless it is an earlier merge (it holds the build's edit) and the copy is kept
-        candidate = unpack(target.read_bytes()); cm = sarc_members(candidate)
+        candidate, cm = archive(target.read_bytes(), 'the mod\'s file')
         if not kept.is_file() or not all(k in cm and candidate[slice(*cm[k])] == build[slice(*bm[k])] for k in MEMBERS):
             target.replace(kept)
     if not kept.is_file():
         raise ValueError(f'{name}: {kept.name} is missing, so the mod\'s own archive is unknown; copy the mod\'s file in again')
-    blarc = unpack(kept.read_bytes()); members = sarc_members(blarc)
+    blarc, members = archive(kept.read_bytes(), kept.name)
     for k in MEMBERS:
         if k not in members or blarc[slice(*members[k])] != original[slice(*om[k])]:
             raise ValueError(f'{name}: the mod changes {k}, which the build patches too, so the two can\'t be merged')

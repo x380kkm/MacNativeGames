@@ -26,6 +26,7 @@ except ImportError:
 ZSDIC_PACK = 'Pack/ZsDic.pack.zs'
 LEVEL = 19   # what make_romfs_patches.py and make_output_res_overlay.py compress their overlays with
 ZSTD_MAGIC = b'\x28\xb5\x2f\xfd'
+UNREADABLE = (AssertionError, IndexError, KeyError, ValueError, struct.error, zstd.ZstdError)   # what a damaged file raises here
 
 
 def zstd_dictionaries(zsdic_pack):
@@ -42,9 +43,9 @@ def zstd_dictionaries(zsdic_pack):
     return dictionaries
 
 
-FrameHeader = namedtuple('FrameHeader', 'dictionary_id content_size checksum single_segment')
-FrameHeader.__doc__ = """The header of a zstd frame: dictionary id (0: none), declared content size (None: not declared),
-    whether a checksum follows the data, and whether the frame is one segment."""
+FrameHeader = namedtuple('FrameHeader', 'dictionary_id content_size checksum')
+FrameHeader.__doc__ = """The header of a zstd frame: dictionary id (0: none), declared content size (None: not declared), and
+    whether a checksum follows the data."""
 
 
 def frame_header(raw):
@@ -53,7 +54,7 @@ def frame_header(raw):
         raise ValueError('not a zstd frame')
     info = zstd.get_frame_info(raw)
     descriptor = raw[4]
-    return FrameHeader(info.dictionary_id, info.decompressed_size, bool(descriptor & 0x04), bool(descriptor & 0x20))
+    return FrameHeader(info.dictionary_id, info.decompressed_size, bool(descriptor & 0x04))
 
 
 def decompress(raw, dictionaries):

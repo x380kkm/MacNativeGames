@@ -52,7 +52,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))   # python -I leaves the script's own folder out
 import make_mod_manifest   # noqa: E402
 from make_mod_manifest import VERSIONS, read_index, romfs_folder, write_mod_manifest   # noqa: E402
-from romfs_formats import ZSDIC_PACK, Byml, compress_like, decompress, sarc_members, zstd_dictionaries   # noqa: E402
+from romfs_formats import UNREADABLE, ZSDIC_PACK, Byml, compress_like, decompress, sarc_members, zstd_dictionaries   # noqa: E402
 
 WEAPON_LIFE = re.compile(r'Life/LifeParameters/Weapon_(Sword|Lsword|Spear|Shield|Bow)_[^/]+\.game__life__LifeParameters\.bgyml')
 PLAYER_CONDITION = 'Component/ConditionParam/Player.game__component__ConditionParam.bgyml'
@@ -60,7 +60,6 @@ PACK = re.compile(r'Pack/.+\.pack\.zs')
 ACTOR_INFO = re.compile(r'RSDB/GameActorInfo\.Product\.\d+\.rstbl\.byml\.zs')
 MAX_DURABILITY = 100000
 RECORD = '.gameplay-tuning.json'
-UNREADABLE = (AssertionError, IndexError, KeyError, ValueError, struct.error)   # what the format code raises on a damaged file
 
 Tuning = namedtuple('Tuning', 'durability drain recharge', defaults=(1, 1, 1))
 Tuning.__doc__ = """The values of one mod: durability and recharge multiply, drain divides."""
