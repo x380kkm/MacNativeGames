@@ -3,6 +3,7 @@
 #import <QuartzCore/CAMetalLayer.h>
 #import <GameController/GameController.h>
 #include <TargetConditionals.h>
+#include <os/proc.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
@@ -324,8 +325,14 @@ static void apply_settings(void) {
     totk_texture_env texture;
     if (!totk_texture_env_build(large, &texture)) {
         if (large) fprintf(stderr, "[totk] settings: large textures \"%s\" is not a pane value; using %s\n", large, totk_large_textures_default());
-        totk_texture_env_build(totk_large_textures_default(), &texture);
+        large = totk_large_textures_default();
     }
+    if (!strcmp(large, "auto")) {   /* the row's default; a choice the player stored arrives as its own mode */
+        size_t available = os_proc_available_memory();
+        large = totk_large_textures_auto(available);
+        fprintf(stderr, "[totk] settings: large textures auto: %zu MiB available at launch, using %s\n", available >> 20, large);
+    }
+    totk_texture_env_build(large, &texture);
     if (texture.mip_keep) setenv("TOTK_MIP_KEEP", texture.mip_keep, 0);
     if (texture.mip_drop) setenv("TOTK_MIP_DROP", texture.mip_drop, 0);
 #if !TARGET_OS_VISION

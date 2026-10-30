@@ -86,8 +86,10 @@ const char *totk_frame_cap_default(void) { return "60"; }
 
 /* "save" sets nothing: the top level is left out except where a copy one level smaller answers wrongly (TOTK_MIP_KEEP's
    default, 1); "more" also keeps the textures a shader samples at a chosen level (TOTK_MIP_KEEP=2); "full" keeps every
-   level of every texture (TOTK_MIP_DROP=0). */
+   level of every texture (TOTK_MIP_DROP=0). "auto" is resolved to one of them at launch (totk_large_textures_auto); on
+   its own it is "save", the one that fits every device. */
 static const struct { const char *mode; totk_texture_env env; } TEXTURES[] = {
+    {"auto", {NULL, NULL}},
     {"save", {NULL, NULL}},
     {"more", {"2",  NULL}},
     {"full", {NULL, "0"}},
@@ -104,4 +106,12 @@ int totk_texture_env_build(const char *mode, totk_texture_env *out) {
 }
 
 /* Must match Root.plist's DefaultValue; tests/test_ios_settings.py checks that. */
-const char *totk_large_textures_default(void) { return "save"; }
+const char *totk_large_textures_default(void) { return "auto"; }
+
+/* "full" needs room for the top levels. Measured on an iPad Pro M4 with them left out (2026-10-30, 912 s of play, no
+   eviction): peak footprint 4,980 MiB, and the texture copies, the only thing "full" enlarges, at most 347 MiB. A copy
+   without its top level is a quarter of the whole texture, so "full" adds at most 3 x 347 = 1,041 MiB. With the 250 MiB
+   the eviction wants free (TOTK_TEX_EVICT_LOW_MB) that makes 6,271 MiB; the app's allowance at launch has to cover that.
+   The allowance is what the system actually grants, entitlement included; the installed memory does not say it. */
+#define FULL_NEEDS_MIB 6400ull
+const char *totk_large_textures_auto(uint64_t available_bytes) { return available_bytes >= FULL_NEEDS_MIB << 20 ? "full" : "save"; }

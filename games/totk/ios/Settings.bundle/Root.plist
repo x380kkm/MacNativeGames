@@ -144,7 +144,7 @@
 			<key>Title</key>
 			<string>大贴图 · Large textures</string>
 			<key>FooterText</key>
-			<string>省内存：大贴图少存最高一级 mip，游戏按位置读取、渲染或复制的除外，近处可能稍模糊。保留更多级：另外保留着色器按指定级取样的贴图，内存用量较多。完整：所有贴图保留全部级，内存用量最高。重新启动游戏后生效 · Save memory: large textures leave out their top mip level, except those the game reads by position, renders into or copies; close-up detail may be a little softer. Keep more levels: also keeps the textures a shader samples at a chosen level, using more memory. Full: every texture keeps every level, using the most memory. Takes effect after relaunching the game</string>
+			<string>自动：内存足够的设备用“完整”，其余用“省内存”。省内存：大贴图少存最高一级 mip，游戏按位置读取、渲染或复制的除外，近处可能稍模糊。保留更多级：另外保留着色器按指定级取样的贴图，内存用量较多。完整：所有贴图保留全部级，内存用量最高。重新启动游戏后生效 · Auto: Full on a device with enough memory, Save memory on the others. Save memory: large textures leave out their top mip level, except those the game reads by position, renders into or copies; close-up detail may be a little softer. Keep more levels: also keeps the textures a shader samples at a chosen level, using more memory. Full: every texture keeps every level, using the most memory. Takes effect after relaunching the game</string>
 		</dict>
 		<dict>
 			<key>Type</key>
@@ -154,15 +154,17 @@
 			<key>Title</key>
 			<string>大贴图 · Large textures</string>
 			<key>DefaultValue</key>
-			<string>save</string>
+			<string>auto</string>
 			<key>Values</key>
 			<array>
+				<string>auto</string>
 				<string>save</string>
 				<string>more</string>
 				<string>full</string>
 			</array>
 			<key>Titles</key>
 			<array>
+				<string>自动 · Auto</string>
 				<string>省内存 · Save memory</string>
 				<string>保留更多级 · Keep more levels</string>
 				<string>完整 · Full</string>

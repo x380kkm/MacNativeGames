@@ -120,6 +120,7 @@ class IOSSettings(unittest.TestCase):
         self.assertEqual(row['Type'], 'PSMultiValueSpecifier')
         self.assertEqual(len(row['Values']), len(row['Titles']))
         self.assertIn(row['DefaultValue'], row['Values'])
+        self.assertEqual(row['DefaultValue'], 'auto')
         executable = self._helper()
         for value in row['Values']:
             with self.subTest(value=value):
