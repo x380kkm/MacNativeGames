@@ -47,7 +47,7 @@ Two routes, pick one:
 | Route | When | How |
 | --- | --- | --- |
 | `--mod` at build time | packaging | `python3 build_app.py <game file> -k <keys> --mod <the manager's folder>` - `scripts/mod_exefs.py` does the 0x100 arithmetic and refuses a patch that leaves `main`'s segments or overlaps the app's own patches (60 FPS, resolution, ultrawide, cloth) |
-| `TOTK_PCHTXT=<file>` at start | while trying a community patch | Mac only; no rebuild per edit |
+| `TOTK_PCHTXT=<file>` at start | while trying a community patch | Mac only, and ignored on 1.4.3; no rebuild per edit |
 
 Never edit `rewritten/<version>/main.patched.bin` by hand: the loader compares the image's SHA-256 with the digest the
 build recorded and stops (`image SHA256 differs from verified rewrite`). Use one of the two routes.

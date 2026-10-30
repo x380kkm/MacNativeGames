@@ -287,7 +287,7 @@ The saves are in the app's `Documents/save`: `account.uid` (16 bytes, the local 
 
 The game's prompts show the Switch's buttons. A controller other than Nintendo's is mapped by position: its right button plays Switch A, the bottom one B, the top one X and the left one Y. So on an Xbox controller the letter in a prompt is not the letter printed on the button to press. A RomFS mod can draw the controller's buttons in the prompts instead. It changes the pictures only: which button does what stays as it is.
 
-The app reads such a mod from its `Documents/mods/v143` (`ios/Sources/main.m`; `v143` is the folder of 1.4.3). An app whose runtime was built from a commit without this (one where `push_device_windows.py` has no `push-mod` command) ignores the folder: build the runtime again and package it, steps 4 and 5 of [Without the card image and keys](#without-the-card-image-and-keys-from-an-earlier-ipa-on-windows). With the debug log on, an app that reads the folder writes `[totk] player mods: <folder>` at start, or `[totk] player mods: none (…)`.
+The app reads such a mod from its `Documents/mods/v143` (`ios/Sources/main.m`; `v143` is the folder of 1.4.3). An app whose runtime was built from a commit without this (one where `push_device_windows.py` has no `push-mod` command) ignores the folder: build the runtime again and package it, steps 4 and 5 of [Without the card image and keys](#without-the-card-image-and-keys-from-an-earlier-ipa-on-windows). With the debug log on, an app that reads the folder writes `[totk] player mods: <folder> (…)` at start, or `[totk] player mods: none (…)`, with the reason in the brackets.
 
 **1. A Python with fontTools,** once. `uv` installs it from its cache without a download when the cache has fontTools (`--offline`; leave that out to download it):
 
@@ -322,6 +322,52 @@ python games/totk/ios/tools/push_device_windows.py push-mod <work>/mods/v143-xbo
 **To remove it:** `push_device_windows.py remove-mod --bundle-id <id>` removes `Documents/mods/v143`, `manifest.tsv` first; the next start plays with the Switch icons. In the Files app, deleting the `mods` folder (On My iPad › Tears of the Kingdom) does the same.
 
 `push-mod` and `remove-mod` have been rehearsed with `--simulate` only (2026-10-30).
+
+### Durability and battery presets, on Windows
+
+A RomFS mod made from your own game files can make weapons, shields and bows last longer and the Zonai battery drain slower and recharge faster. You make four folders on the PC, copy them to the device and choose one in the Settings app; the game loads it at its next start. [mods.md](mods.md#gameplay-tuning) says which values change.
+
+| Settings › TOTK › Mods › Durability and battery | Folder in `Documents/mods` | Maximum durability | Battery drain | Recharge |
+| --- | --- | --- | --- | --- |
+| Off | `v143-off` | unchanged | unchanged | unchanged |
+| Moderate | `v143-moderate` | ×3 | ÷2 | ×2 |
+| Strong (the row's default) | `v143-strong` | ×5 | ÷3 | ×3 |
+| Max | `v143-max` | ×10 | ÷5 | ×5 |
+
+The game loads one mod folder, so every folder also holds the button icon files, and Off is the icons alone. This is a gameplay change. It reaches the game only through these folders, which you make from your own game files: upstream's app has no such row, and in this fork the row's default is Strong, so with the folders on the device the game plays Strong until the row says otherwise. Without a folder for the chosen row the app uses `Documents/mods/v143`, and without that one it loads no mod.
+
+The row and the choice of folder are in the app itself. An app whose runtime was built from a commit without them (one where `push_device_windows.py` has no `push-slots` command) has no row and ignores these folders: build the runtime again and package it, steps 4 and 5 of [Without the card image and keys](#without-the-card-image-and-keys-from-an-earlier-ipa-on-windows).
+
+**1. Make the button icon mod:** steps 1 and 2 of [Controller button icons, on Windows](#controller-button-icons-on-windows).
+
+**2. Make the four folders** from the RomFS that `recover_ipa.py` recovered, with the icon mod as the base:
+
+```powershell
+python games/totk/scripts/make_gameplay_tuning.py --romfs <work>/totk/extracted/v143/romfs --slots <work>/mods --base <work>/mods/v143-xbox
+```
+
+It writes `v143-off`, `v143-moderate`, `v143-strong` and `v143-max` into `<work>/mods`. Each one is a copy of the base folder with its slot's values and its own `manifest.tsv`. Run it again after a new icon mod: each folder is built beside the old one and then takes its place. A folder of that name the script did not make stops the run. The values come from the table `SLOTS` in the script. The folders hold files made from the game's own: keep them on your PC, and never commit or upload them.
+
+**3. Copy them to the device:**
+
+```powershell
+python games/totk/ios/tools/push_device_windows.py push-slots <work>/mods --bundle-id <id>
+```
+
+`push-slots` checks every folder as `push-mod` does, then copies them one after the other (46 MiB each, 44 MiB for `v143-off`). A copy that stopped goes on where it stopped. To put your own mod in a slot, `push-mod <folder> --slot strong` copies one folder into `Documents/mods/v143-strong`; `deploy … --mod <folder> --slot strong` does the same after the install.
+
+**4. Choose a slot** in Settings › TOTK › Mods, and restart the game. With the debug log on, the log says which folder it loaded and why: `[totk] player mods: <folder> (mod slot strong)`.
+
+**To remove them:** `push_device_windows.py remove-mod --bundle-id <id> --slot strong` removes `Documents/mods/v143-strong`, and the other slots likewise. In the Files app, deleting the `mods` folder removes them all.
+
+What they do not change:
+
+- A higher maximum durability reaches only items obtained after the mod is in, because a save keeps each item's durability. Items picked up with a slot in use are expected to keep their durability after the slot changes, so back up the saves first (`backup-save`).
+- The number of battery cells is saved and stays. Only the drain and the recharge rate change.
+- The pause before the battery recharges is a constant in the game's code and stays. That the recharge value scales the recharge at all is likely, not proven.
+- `make_gameplay_tuning.py --wear` (wear per hit, which would also reach items you already own) is experimental, and the four folders do not use it.
+
+On the PC this was tried on (2026-10-30), `--slots` took 53 s. `v143-off` holds the 6 icon files, and the other folders 214 files, 45.8 MiB. A comparison with the RomFS found only the intended values changed, 418 fields of 4 bytes in 208 files, with the SARC member tables, the unpacked sizes and the zstd dictionaries as they were. The runtime's overlay code, compiled on Windows with Visual Studio's clang, accepted each folder on top of the build's overlay. `push-slots` has been rehearsed with `--simulate` only, and the change to `main.m` has only been syntax-checked. None of this has run on a device yet, so no effect has been seen in the game.
 
 ## Apple Vision Pro
 
@@ -371,7 +417,7 @@ Tears of the Kingdom; for Breath of the Wild replace `TOTK` with `BotW` and `tot
 - Game data (only for an app built with `--mac-game-data library` or `--mac-game-data-folder`): `~/Library/Application Support/MacNativeGames/TOTK/GameData/<version>` (`BotW` for Breath of the Wild) holds the 16 GB RomFS image `romfs.bin`, and `romfs.sha256`, which the build writes once the copy is complete. By default the image is inside the app. With `--mac-game-data library` the build puts it in this folder once (an APFS clone when the work folder is on the same volume, otherwise a copy), and later builds leave it alone while it matches the version's pin. The app is then a few hundred MB, so a new build installs or copies to another Mac quickly. To keep it somewhere else, for example on another disk, add `--mac-game-data-folder <folder>` to the build instead (that alone is enough; the image goes in `<folder>/<version>`, so one folder can hold both games). The app remembers the folder, and when it holds no complete image (another Mac, or the disk is not connected) the launcher looks in `GameData` instead. When neither has it, the app asks where the game data is: connect the disk and choose Try Again, or choose the folder that holds `romfs.bin` (or its `<version>` folder). It reads the image where it is, without moving or copying it, and remembers the folder for the next starts (`defaults delete org.macnativegames.botw MNGGameDataFolder.botw190` forgets it). The game still checks the image against the pin at its first start. `make_mod_manifest.py --app` and `make_button_icons.py --app` find the image the same way (`--romfs-data <folder>` names it).
 - Shader cache: `~/Library/Application Support/MacNativeGames/TOTK/shader-cache`
 - Shaders the shared list lacks: `~/Library/Application Support/MacNativeGames/TOTK/shader-list-contribution.txt` (the game asks before it starts whether to send them; see the [shared shader list](shader-list.md))
-- Mods: `~/Library/Application Support/MacNativeGames/TOTK/mods/<v0|v112|v121|v143>`; see [mods.md](mods.md). On an iPhone or iPad: the app's `Documents/mods/<version>` (`v143` for 1.4.3); see [Controller button icons, on Windows](#controller-button-icons-on-windows)
+- Mods: `~/Library/Application Support/MacNativeGames/TOTK/mods/<v0|v112|v121|v143>`; see [mods.md](mods.md). On an iPhone or iPad: the app's `Documents/mods/<version>` (`v143` for 1.4.3), or `<version>-<slot>` beside it; see [Controller button icons, on Windows](#controller-button-icons-on-windows) and [Durability and battery presets, on Windows](#durability-and-battery-presets-on-windows)
 - Log: off by default. `defaults write org.macnativegames.totk TOTK_DEBUG_LOG -bool YES` turns it on from the next start, written to `~/Library/Logs/MacNativeGames/totk.log`. On an iPhone: Settings › TOTK › Debug log, written to the app's `Documents/log.txt`.
 
 ## Known issues

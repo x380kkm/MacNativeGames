@@ -286,7 +286,7 @@ python games/totk/ios/tools/push_device_windows.py deploy <目录>/TOTK.ipa --ro
 
 游戏的按键提示画的是 Switch 的按键。任天堂以外的手柄按位置映射：右边的键是 Switch 的 A，下边是 B，上边是 X，左边是 Y。所以用 Xbox 手柄时，提示里的字母和要按的那个键上印的字母不一样。RomFS mod 可以在提示里改画手柄自己的按键。它只改图，哪个键做什么不变。
 
-App 从自己的 `Documents/mods/v143` 读取这样的 mod（`ios/Sources/main.m`；`v143` 是 1.4.3 的文件夹）。运行时所在的提交里还没有这项改动（`push_device_windows.py` 没有 `push-mod` 命令）的 App 不读这个文件夹：按[没有卡带镜像和密钥](#没有卡带镜像和密钥在-windows-上用旧-ipa-重新打包)的第 4 步重新构建运行时，再按其第 5 步打包。打开日志时，读这个文件夹的 App 启动时会写 `[totk] player mods: <文件夹>`，或 `[totk] player mods: none (…)`。
+App 从自己的 `Documents/mods/v143` 读取这样的 mod（`ios/Sources/main.m`；`v143` 是 1.4.3 的文件夹）。运行时所在的提交里还没有这项改动（`push_device_windows.py` 没有 `push-mod` 命令）的 App 不读这个文件夹：按[没有卡带镜像和密钥](#没有卡带镜像和密钥在-windows-上用旧-ipa-重新打包)的第 4 步重新构建运行时，再按其第 5 步打包。打开日志时，读这个文件夹的 App 启动时会写 `[totk] player mods: <文件夹> (…)`，或 `[totk] player mods: none (…)`，括号里是原因。
 
 **1. 带 fontTools 的 Python**，只做一次。uv 的缓存里有 fontTools 时，`uv` 从缓存安装，不用下载（`--offline`；去掉它就联网下载）：
 
@@ -321,6 +321,52 @@ python games/totk/ios/tools/push_device_windows.py push-mod <工作目录>/mods/
 **删除：** `push_device_windows.py remove-mod --bundle-id <id>` 删掉 `Documents/mods/v143`，先删 `manifest.tsv`；下次启动就是 Switch 图标。在“文件”App 里删掉 `mods` 文件夹（我的 iPad › Tears of the Kingdom）效果一样。
 
 `push-mod` 和 `remove-mod` 目前只用 `--simulate` 演练过（2026-10-30）。
+
+### 耐久和电池预设（Windows）
+
+用自己的游戏文件做出的 RomFS mod，可以让武器、盾和弓更耐用，让 Zonai 电池耗电更慢、回充更快。在电脑上做好四个文件夹，复制到设备，在“设置”App 里选一个；游戏下次启动时加载它。具体改哪些数值见 [mods.md](mods.md#gameplay-tuning-zh)。
+
+| 设置 › TOTK › 模组 › 耐久与电池 | `Documents/mods` 里的文件夹 | 最大耐久 | 耗电 | 回充 |
+| --- | --- | --- | --- | --- |
+| 关 | `v143-off` | 不变 | 不变 | 不变 |
+| 中 | `v143-moderate` | ×3 | ÷2 | ×2 |
+| 强（这一行的默认值） | `v143-strong` | ×5 | ÷3 | ×3 |
+| 最大 | `v143-max` | ×10 | ÷5 | ×5 |
+
+游戏只加载一个 mod 文件夹，所以每个文件夹里都带着按键图标文件，“关”就是只有图标。这是对玩法的改动。它只通过这些文件夹进入游戏，而这些文件夹是你用自己的游戏文件做的：上游的 App 没有这一行；本分支这一行的默认值是“强”，所以文件夹在设备上时，游戏按“强”运行，除非改这一行。选中的那一行没有文件夹时，App 用 `Documents/mods/v143`，这个也没有就不加载 mod。
+
+这一行和选择文件夹的代码都在 App 里。运行时所在的提交里还没有这项改动（`push_device_windows.py` 没有 `push-slots` 命令）的 App 没有这一行，也不读这些文件夹：按[没有卡带镜像和密钥](#没有卡带镜像和密钥在-windows-上用旧-ipa-重新打包)的第 4 步重新构建运行时，再按其第 5 步打包。
+
+**1. 做按键图标 mod：**[手柄按键图标（Windows）](#手柄按键图标windows)的第 1、2 步。
+
+**2. 做四个文件夹**，用 `recover_ipa.py` 还原的 RomFS，以图标 mod 为基础：
+
+```powershell
+python games/totk/scripts/make_gameplay_tuning.py --romfs <工作目录>/totk/extracted/v143/romfs --slots <工作目录>/mods --base <工作目录>/mods/v143-xbox
+```
+
+它在 `<工作目录>/mods` 里写出 `v143-off`、`v143-moderate`、`v143-strong` 和 `v143-max`。每个都是基础文件夹的副本，加上这一档的数值和自己的 `manifest.tsv`。换了图标 mod 就再运行一次：每个文件夹先在旧文件夹旁边做好，再取代它。同名文件夹不是这个脚本做的时，运行会停止。数值来自脚本里的 `SLOTS` 表。这些文件夹里的文件是用游戏自己的文件做出来的：只留在自己的电脑上，不要提交，也不要上传。
+
+**3. 复制到设备：**
+
+```powershell
+python games/totk/ios/tools/push_device_windows.py push-slots <工作目录>/mods --bundle-id <id>
+```
+
+`push-slots` 先像 `push-mod` 那样核对每个文件夹，再逐个复制（每个 46 MiB，`v143-off` 是 44 MiB）。复制中断后再运行，会从中断的地方继续。要把自己的 mod 放进某一档，`push-mod <文件夹> --slot strong` 把一个文件夹复制到 `Documents/mods/v143-strong`；`deploy … --mod <文件夹> --slot strong` 在安装之后做同样的事。
+
+**4. 选一档：**在“设置 › TOTK › 模组”里选择，然后重新启动游戏。打开日志时，日志会写出加载了哪个文件夹和原因：`[totk] player mods: <文件夹> (mod slot strong)`。
+
+**删除：** `push_device_windows.py remove-mod --bundle-id <id> --slot strong` 删掉 `Documents/mods/v143-strong`，其它档同样处理。在“文件”App 里删掉 `mods` 文件夹会全部删除。
+
+这些文件夹不改变的东西：
+
+- 更高的最大耐久只影响 mod 生效后才拿到的物品，因为存档保留每件物品的耐久。用某一档时拿到的物品，换档之后应该还保留原来的耐久，所以请先备份存档（`backup-save`）。
+- 电池格数保存在存档里，不变。变的只有耗电和回充的速度。
+- 回充前的等待是游戏代码里的常量，不变。回充数值确实影响回充速度，这一点只是很可能，尚未证实。
+- `make_gameplay_tuning.py --wear`（每次攻击的耐久损耗，应该也影响已有的物品）是实验性的，这四个文件夹没有用它。
+
+在实际运行的电脑上（2026-10-30），`--slots` 用了 53 秒。`v143-off` 里是 6 个图标文件，其它文件夹是 214 个文件，共 45.8 MiB。与 RomFS 对比，只有预期的数值变了：208 个文件里的 418 个 4 字节字段，SARC 成员表、解压后的大小和 zstd 字典都没变。运行时的覆盖代码用 Visual Studio 的 clang 在 Windows 上编译后，叠在构建的覆盖之上接受了每个文件夹。`push-slots` 目前只用 `--simulate` 演练过，`main.m` 的改动只做过语法检查。这些都还没有在设备上运行过，所以还没有在游戏里看到效果。
 
 ## Apple Vision Pro
 
@@ -389,7 +435,7 @@ python3.14 games/totk/ios/tools/install_device.py "<文件夹>/TOTK-Vision.app" 
 - 存档：`~/Library/Application Support/MacNativeGames/TOTK/profile`
 - 着色器缓存：`~/Library/Application Support/MacNativeGames/TOTK/shader-cache`
 - 公共清单里还没有的着色器：`~/Library/Application Support/MacNativeGames/TOTK/shader-list-contribution.txt`。游戏启动前会问要不要发送，见[公共着色器清单](shader-list.md)。
-- 模组：`~/Library/Application Support/MacNativeGames/TOTK/mods/<v0|v112|v121|v143>`，见 [mods.md](mods.md)。iPhone 或 iPad 上是 App 的 `Documents/mods/<版本>`（1.4.3 是 `v143`），见[手柄按键图标（Windows）](#手柄按键图标windows)。
+- 模组：`~/Library/Application Support/MacNativeGames/TOTK/mods/<v0|v112|v121|v143>`，见 [mods.md](mods.md)。iPhone 或 iPad 上是 App 的 `Documents/mods/<版本>`（1.4.3 是 `v143`），或它旁边的 `<版本>-<档位>`，见[手柄按键图标（Windows）](#手柄按键图标windows)和[耐久和电池预设（Windows）](#耐久和电池预设windows)。
 - 日志：默认关闭。
   - Mac：`defaults write org.macnativegames.totk TOTK_DEBUG_LOG -bool YES`，下次启动起写到 `~/Library/Logs/MacNativeGames/totk.log`。
   - iPhone：在“设置 › TOTK › 記錄日誌”打开，写到 App 的 `Documents/log.txt`。
