@@ -1,6 +1,9 @@
 /* games/totk/runtime/aspect_math.h without the game: TOTK_ASPECT parsing, key 4's steps, the Vert+ factor, the UI
    squeeze (gfx/nvn/totk_ui_squeeze.h), the camera site patterns on sequences built here (no game code in the repository), and (on Apple silicon)
    the stubs run for real against a fake projection. */
+#ifdef _WIN32
+#define _CRT_SECURE_NO_WARNINGS   /* this builds with -Werror, and the MSVC headers mark sscanf deprecated */
+#endif
 #include "../games/totk/runtime/aspect_math.h"
 #include "../games/totk/third_party/d2r_gfx/gfx/nvn/totk_ui_squeeze.h"
 #include <math.h>

@@ -1,6 +1,9 @@
 /* The preset frame rate from the launch to the game's start, with production code in main.m's order. test_ios_settings.py
    inserts production phone_holds_30, runtime_phone_fps, runtime_phone_fps_set (hle_nvn.c), apply_frame_env and
    apply_preset_frame_rate (main.m) here. */
+#ifdef _WIN32
+#define _CRT_SECURE_NO_WARNINGS   /* this builds with -Werror, and the MSVC headers mark getenv deprecated */
+#endif
 #include "settings_map.h"
 #include <stdatomic.h>
 #include <stdio.h>

@@ -1,6 +1,9 @@
 /* The occlusion report rules on crafted submissions. test_occlusion_guard.py inserts production occl_guard_on,
    occl_settle and vis_count_lost here. argv[1]: "on" or "off", the guard state the switch and the build are expected to
    give. */
+#ifdef _WIN32
+#define _CRT_SECURE_NO_WARNINGS   /* this builds with -Werror, and the MSVC headers mark getenv deprecated */
+#endif
 #include "nvn_obj.h"
 #include <stdatomic.h>
 #include <stdio.h>
