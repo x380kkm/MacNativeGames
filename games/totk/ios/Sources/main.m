@@ -312,6 +312,9 @@ static void apply_settings(void) {
        over at all, so neither can overwrite the other. Which keys belong to which layer is settings_map.c's table. */
     BOOL custom = [d boolForKey:@"TOTK_CUSTOM_PICTURE"];
     totk_key_layer layer_of = custom ? TOTK_KEY_CUSTOM : TOTK_KEY_PRESET;
+#if !TARGET_OS_VISION
+    BOOL scene_from_launch = getenv("TOTK_RENDER_RES") != NULL;   // here, before the loop hands the stored row to that variable
+#endif
     for (NSString *key in defaults) {
         totk_key_layer owned = totk_key_layer_of(key.UTF8String);
         if (owned != TOTK_KEY_ALWAYS && owned != layer_of) continue;
@@ -389,7 +392,7 @@ static void apply_settings(void) {
             fprintf(stderr, "[totk] settings: scene \"%s\" is not a pane value; using %s\n",
                     scene_text.UTF8String ?: "", fallback.UTF8String);
             [d setObject:fallback forKey:@"TOTK_RENDER_RES"];
-            if (!getenv("TOTK_RENDER_RES")) setenv("TOTK_RENDER_RES", fallback.UTF8String, 1);
+            if (!scene_from_launch) setenv("TOTK_RENDER_RES", fallback.UTF8String, 1);
         }
         layer = [NSString stringWithFormat:@"custom (%@, scene %s, %@ fps)", picture, getenv("TOTK_RENDER_RES") ?: "?", cap];
     } else {

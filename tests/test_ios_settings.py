@@ -207,6 +207,15 @@ class IOSSettings(unittest.TestCase):
         main = (ROOT / 'games/totk/ios/Sources/main.m').read_text(encoding='utf-8')
         self.assertIn('[value length] && [value length] < 64', main)
 
+    def test_a_stored_scene_the_pane_dropped_goes_on_that_launch(self):
+        """A source check, apply_settings being UIKit's: the loop hands the stored scene to the variable, so only what the
+        variable held before the loop tells a launch value from it."""
+        main = (ROOT / 'games/totk/ios/Sources/main.m').read_text(encoding='utf-8')
+        body = re.search(r'static void apply_settings\(void\) \{.*?\n}\n', main, re.S).group()
+        self.assertLess(body.index('BOOL scene_from_launch = getenv("TOTK_RENDER_RES") != NULL;'),
+                        body.index('for (NSString *key in defaults)'))
+        self.assertIn('if (!scene_from_launch) setenv("TOTK_RENDER_RES", fallback.UTF8String, 1);', body)
+
     def test_every_row_is_applied_at_launch(self):
         # main.m registers every TOTK_* row that has a DefaultValue and hands it to the runtime as an environment
         # variable; a row without one, or a key without the prefix, would show in Settings and change nothing.
