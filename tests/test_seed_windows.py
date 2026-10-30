@@ -175,9 +175,11 @@ class ExtraList(unittest.TestCase):
         self.assertEqual(merged.variants, {(KEY_A, PLAIN), (KEY_B, DEPTH), (KEY_C, PLAIN)})
         self.assertEqual(list(merged.warm), list(shader_list.ShaderList.load(self.shared).warm))
         self.assertTrue(path.read_bytes().startswith(self.shared.read_bytes()))
-        first = path.read_bytes()
-        seed_windows.list_with_rows({(KEY_C, PLAIN), (KEY_A, PLAIN), (KEY_B, DEPTH)}, path)
-        self.assertEqual(path.read_bytes(), first)   # the same rows give the same file: the seed is reused
+        # The same rows give the same file, so the seed is reused. A list in reverse order, since a set's order changes with
+        # each process's string hashes and could come out sorted by chance.
+        seed_windows.list_with_rows([(KEY_C, PLAIN), (KEY_B, DEPTH), (KEY_A, PLAIN)], path)
+        appended = path.read_bytes()[len(self.shared.read_bytes()):]
+        self.assertEqual(appended, f'V\t{KEY_A}\t{PLAIN}\nV\t{KEY_B}\t{DEPTH}\nV\t{KEY_C}\t{PLAIN}\n'.encode())
 
     def test_a_row_is_served_as_the_runtime_picks(self):
         seed = self.seed({KEY_A: [dict(tex={'8': '*'}), dict(tex={'8': '*_depth'})]})
