@@ -1,6 +1,6 @@
 /* One image at two colour slots on crafted passes. test_rt_dup.py inserts production rt_dup_on, rt_dup_share_clears,
-   rt_dup_other_slots, rt_dup_note_draw and rt_dup_unstored here; rt_dup_of comes from nvn_obj.h. argv[1]: "on" or "off",
-   the state the switch and the build are expected to give. */
+   rt_dup_other_slots, rt_dup_pend_clear, rt_dup_note_draw and rt_dup_unstored here; rt_dup_of comes from nvn_obj.h. argv[1]:
+   "on" or "off", the state the switch and the build are expected to give. */
 #include "nvn_obj.h"
 #include <stdio.h>
 #include <stdlib.h>

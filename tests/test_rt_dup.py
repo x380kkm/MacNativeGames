@@ -1,7 +1,7 @@
 """One image at two colour slots (docs/how-it-works.md) with production code from nvn_mtl.m and nvn_obj.h: which slot is
 stored, what a draw marks and where clears go, in tests/rt_dup_probe.c, for each combination of platform, game and
 TOTK_RT_DUP. The places that use these rules are Objective-C, so source checks keep the draw, both store paths, the
-mid-pass clear and the tile read asking them."""
+clears and the tile read asking them. On macOS tests/refl_colors_probe.m runs the reflection reader the draw's mark uses."""
 import json
 import os
 from pathlib import Path
