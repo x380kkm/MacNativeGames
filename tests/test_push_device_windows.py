@@ -9,6 +9,7 @@ import io
 import json
 import os
 import plistlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -369,6 +370,191 @@ FONT, TABLE, LAYOUT = ('Font/Font.Nin_NX_NVN.bfarc.zs', 'System/Resource/Resourc
                        'UI/LayoutArchive/Common.Product.140.Nin_NX_NVN.blarc.zs')
 
 
+class Deploy(unittest.TestCase):
+    """deploy with --simulate: what stops it while the device is as it was, so it never ends with an app that cannot start."""
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory(); self.addCleanup(self.dir.cleanup); self.root = Path(self.dir.name)
+        self.container = self.root/'device'
+        self.data = self.container/push.GAMEDATA
+        self.ipa_file = self.ipa()
+
+    def ipa(self, extra=()):
+        ipa = self.root/'a.ipa'
+        with zipfile.ZipFile(ipa, 'w') as z:
+            z.writestr('Payload/A.app/Info.plist', plistlib.dumps({'CFBundleIdentifier': 'a.b', 'CFBundleVersion': 'new'}))
+            for name in extra: z.writestr(f'Payload/A.app/{name}', b'x')
+        return ipa
+
+    def deploy(self, *args):
+        return subprocess.run([sys.executable, str(TOOLS/'push_device_windows.py'), 'deploy', str(self.ipa_file), *map(str, args),
+                               '--simulate', str(self.container)], capture_output=True, text=True)
+
+    def on_device(self):
+        return {p.relative_to(self.container).as_posix(): p.read_bytes() for p in self.container.rglob('*') if p.is_file()}
+
+    def old_app(self):
+        """An installed app, whose data a device shows; a run that installed over it would change this record."""
+        self.data.mkdir(parents=True)
+        (self.container/'.installed.json').write_text(json.dumps({'CFBundleIdentifier': 'a.b', 'CFBundleVersion': 'old'}))
+
+    def image(self, size=10):
+        """romfs.bin with its index.json, as --romfs takes them."""
+        folder = self.root/'romfs'; folder.mkdir(exist_ok=True)
+        (folder/'romfs.bin').write_bytes(bytes(size))
+        (folder/'index.json').write_text(json.dumps({'romfs_sha256': hashlib.sha256(bytes(size)).hexdigest(), 'romfs_size': size}))
+        return folder/'romfs.bin'
+
+    def seed_folder(self, name='a-shader-seed'):
+        """A device seed, by default where deploy looks for one: beside the IPA."""
+        seed = self.root/name; seed.mkdir()
+        (seed/'fingerprint.txt').write_text('f' * 64 + '\n')
+        (seed/'a_b.metal').write_bytes(b'shader')
+        return seed
+
+    def image_on_device(self, marker='a' * 64):
+        (self.data/'romfs.bin.000').write_bytes(b'part')
+        if marker is not None:
+            (self.data/'romfs.sha256').write_text(marker + '\n')
+
+    def seed_on_device(self, marker=f'shader-seed-aaaaaaaaaaaa-1\n{"a" * 64}\n', kept='shader-seed-aaaaaaaaaaaa-1/seed-manifest.json'):
+        """shader-seed.txt and a file of the seed it names: `kept`, in the unpacked folder or the pack the app has not unpacked."""
+        (self.data/'shader-seed.txt').write_bytes(marker.encode())
+        if kept:
+            (self.data/kept).parent.mkdir(exist_ok=True)
+            (self.data/kept).write_bytes(b'{}')
+
+    def stops(self, *args, says):
+        """The run ends with exit 1 and `says` in its error, and the device is as it was."""
+        before = self.on_device()
+        run = self.deploy(*args, '--no-backup')
+        self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
+        for text in says:
+            self.assertIn(text, run.stderr)
+        self.assertNotIn('done.', run.stdout)
+        self.assertEqual(self.on_device(), before, 'it changed the device first')
+
+    def finishes(self, *args):
+        """The run ends with exit 0 and the new app on the device. Returns what it printed."""
+        run = self.deploy(*args, '--no-backup')
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        self.assertIn('done.', run.stdout)
+        self.assertEqual(json.loads((self.container/'.installed.json').read_text())['CFBundleVersion'], 'new')
+        return run.stdout
+
+    def test_the_folder_a_seed_is_made_from_is_not_a_device_seed(self):
+        raw = self.root/'seed-f1d0077/seed'; raw.mkdir(parents=True)
+        (raw/'seed-manifest.json').write_text('{}')
+        self.stops('--romfs', self.image(), '--seed', raw, says=('fingerprint.txt not found', 'not the folder it is made from'))
+
+    def test_a_seed_with_a_cut_fingerprint_stops_the_run(self):
+        seed = self.seed_folder()
+        (seed/'fingerprint.txt').write_text('short\n')
+        self.stops('--romfs', self.image(), says=('is not a SHA-256',))              # the folder beside the IPA
+        self.stops('--romfs', self.image(), '--seed', seed, says=('is not a SHA-256',))
+
+    def test_a_bad_seed_stops_the_run_for_an_app_that_carries_its_shaders_too(self):
+        self.ipa_file = self.ipa(['GameData/shader-seed/seed-manifest.json', 'GameData/romfs/romfs.bin'])
+        self.stops('--seed', self.root/'none', says=('fingerprint.txt not found',))
+
+    def test_a_romfs_that_is_not_there_stops_the_run(self):
+        self.seed_folder()
+        self.stops('--romfs', self.root/'none/romfs.bin', says=('index.json',))
+
+    def test_a_romfs_of_another_size_stops_the_run(self):
+        self.seed_folder()
+        image = self.image()
+        image.write_bytes(b'cut')
+        self.stops('--romfs', image, says=('its index.json says 10',))
+
+    def test_a_romfs_without_its_index_stops_the_run(self):
+        self.seed_folder()
+        image = self.image()
+        (image.parent/'index.json').unlink()
+        self.stops('--romfs', image, says=('index.json',))
+
+    def test_no_seed_anywhere_stops_the_run(self):
+        self.stops('--romfs', self.image(), says=('a-shader-seed', 'none on the device', '--seed'))
+
+    def test_no_image_anywhere_stops_the_run(self):
+        self.seed_folder()
+        self.stops(says=('no game data', 'none on the device', '--romfs'))
+
+    def test_a_marker_that_names_no_seed_is_no_seed(self):
+        folder = 'shader-seed-aaaaaaaaaaaa-1'
+        self.old_app(); self.image_on_device()
+        for marker, kept in (('stale\n', f'{folder}/seed-manifest.json'), (f'{folder}\n{"a" * 64}\n', None),
+                             (f'{folder}\nshort\n', f'{folder}/seed-manifest.json')):
+            with self.subTest(marker=marker, kept=kept):
+                self.seed_on_device(marker, kept)
+                self.stops(says=('none on the device',))
+                shutil.rmtree(self.data/folder, ignore_errors=True)
+
+    def test_an_image_still_being_copied_is_no_image(self):
+        self.old_app(); self.seed_on_device(); self.image_on_device(f'copying {"a" * 64}')
+        self.stops(says=('no game data',))
+
+    def test_a_marker_without_the_image_is_no_image(self):
+        self.old_app(); self.seed_on_device()
+        (self.data/'romfs.sha256').write_text('a' * 64 + '\n')
+        self.stops(says=('no game data',))
+
+    def test_a_stopped_run_leaves_the_installed_app_and_makes_no_backup(self):
+        self.old_app()
+        (self.container/push.SAVE).mkdir(parents=True); (self.container/push.SAVE/'account.uid').write_bytes(bytes(16))
+        before = self.on_device()
+        run = self.deploy('--backup-to', self.root/'backups')
+        self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
+        self.assertEqual(self.on_device(), before)
+        self.assertFalse((self.root/'backups').exists())
+
+    def test_what_the_device_has_is_enough(self):
+        self.old_app(); self.image_on_device(); self.seed_on_device()
+        output = self.finishes()
+        self.assertIn('game data: the device has an image', output)
+        self.assertIn('shaders: the device has a seed', output)
+
+    def test_a_pack_the_app_has_not_unpacked_is_a_seed(self):
+        self.old_app(); self.image_on_device(); self.seed_on_device(kept='shader-seed-aaaaaaaaaaaa-1.pack.000')
+        self.finishes()
+
+    def test_an_image_in_parts_without_a_marker_is_an_image(self):
+        self.old_app(); self.image_on_device(None); self.seed_on_device()   # main.m reads it: only "copying ..." holds it back
+        self.finishes()
+
+    def test_a_whole_image_file_is_an_image(self):
+        self.old_app(); self.seed_on_device()
+        (self.data/'romfs.bin').write_bytes(b'whole')
+        self.finishes()
+
+    def test_what_the_app_carries_needs_nothing_else(self):
+        self.ipa_file = self.ipa(['GameData/shader-seed/seed-manifest.json', 'GameData/romfs/romfs.bin'])
+        self.finishes()
+        self.assertEqual(sorted(self.data.glob('*')), [])
+
+    def test_the_seed_beside_the_ipa_and_the_image_are_copied(self):
+        self.seed_folder()
+        self.finishes('--romfs', self.image())
+        self.assertEqual((self.data/'romfs.sha256').read_text().strip(), hashlib.sha256(bytes(10)).hexdigest())
+        self.assertEqual((self.data/'shader-seed.txt').read_text().split('\n')[1], 'f' * 64)
+
+    def test_seed_names_a_device_seed_elsewhere(self):
+        self.finishes('--romfs', self.image(), '--seed', self.seed_folder('elsewhere'))
+        self.assertEqual((self.data/'shader-seed.txt').read_text().split('\n')[1], 'f' * 64)
+
+    def test_a_new_seed_replaces_the_one_on_the_device(self):
+        self.old_app(); self.image_on_device(); self.seed_on_device(); self.seed_folder()
+        self.finishes()
+        self.assertEqual((self.data/'shader-seed.txt').read_text().split('\n')[1], 'f' * 64)
+
+    def test_the_seed_command_says_what_it_takes(self):
+        self.old_app()
+        (self.root/'raw').mkdir()
+        run = subprocess.run([sys.executable, str(TOOLS/'push_device_windows.py'), 'seed', str(self.root/'raw'),
+                              '--bundle-id', 'a.b', '--simulate', str(self.container)], capture_output=True, text=True)
+        self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
+        self.assertIn('fingerprint.txt not found', run.stderr)
+
+
 class Mods(unittest.TestCase):
     """push-mod and remove-mod: a RomFS mod in Documents/mods/<version>, which ios/Sources/main.m hands to the runtime
     when it holds a manifest.tsv; the manifest is written as make_mod_manifest.py writes it."""
@@ -545,6 +731,10 @@ class Mods(unittest.TestCase):
 
     def test_the_commands_with_simulate(self):
         mod = self.mod({FONT: b'font'})
+        self.box.install(self.ipa())
+        data = self.root/'device'/push.GAMEDATA/'shader-seed-aaaaaaaaaaaa-1'; data.mkdir(parents=True)   # deploy wants both
+        (data.parent/'shader-seed.txt').write_bytes(f'{data.name}\n{"a" * 64}\n'.encode())
+        (data.parent/'romfs.bin.000').write_bytes(b'part'); (data.parent/'romfs.sha256').write_text('a' * 64 + '\n')
         script = TOOLS/'push_device_windows.py'
         def run(*args):
             return subprocess.run([sys.executable, str(script), *map(str, args), '--simulate', self.root/'device'],

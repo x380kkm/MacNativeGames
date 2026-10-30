@@ -21,7 +21,10 @@ IPA's for deploy and install.
 
 deploy backs up the saves of an installed app first, installs over it (same bundle identifier and team: iOS keeps its
 Documents, so the saves and the game data stay), copies the image given with --romfs when the device lacks it, and the
-shaders beside the IPA (<name>-shader-seed, package_ipa_windows.py --seed) when their fingerprint is new. The saves are
+shaders beside the IPA (<name>-shader-seed, package_ipa_windows.py --seed) when their fingerprint is new. Before any of that
+it stops when the app could not start afterwards, so the app installed stays as it was: a --romfs or --seed that is not what
+the app reads (--seed takes that device seed, not the folder it is made from), or no image or no shaders in the app, on the
+device or among the arguments. The saves are
 Documents/save: account.uid (16 bytes, the local account) names the folder save/save/<hi><lo> that holds them
 (runtime/account.c, fs_host.c); a backup (<dir>/<bundle id>-save-<time>/save with backup-manifest.json) keeps both, and
 a restore first backs up what the device has (beside the backup, or into --safety-to). Close the game before a restore.
@@ -94,11 +97,25 @@ def bar(total, what):
     return show
 
 
+def romfs_sha_size(image):
+    """The SHA-256 and the size of a RomFS image, which has to be as large as the index.json beside it says."""
+    index = json.loads((image.parent/'index.json').read_text())
+    size = image.stat().st_size
+    require(size == index['romfs_size'], f'{image}: {size} bytes, its index.json says {index["romfs_size"]}')
+    return index['romfs_sha256'], size
+
+
+def device_has_image(box):
+    """Whether the device holds a whole RomFS image, as ios/Sources/main.m looks for one in Documents/GameData."""
+    have = box.listdir(GAMEDATA) or {}
+    marker = box.read(f'{GAMEDATA}/romfs.sha256')
+    copying = marker is not None and len(marker.decode(errors='replace').strip()) != 64
+    return ('romfs.bin' in have or 'romfs.bin.000' in have) and not copying
+
+
 def push_romfs(box, image, log=print, progress=None):
     """The RomFS image into Documents/GameData in 1 GiB parts (install_device.py push_game_data). Returns what was done."""
-    index = json.loads((image.parent/'index.json').read_text())
-    sha, size = index['romfs_sha256'], image.stat().st_size
-    require(size == index['romfs_size'], f'{image}: {size} bytes, its index.json says {index["romfs_size"]}')
+    sha, size = romfs_sha_size(image)
     want = {f'romfs.bin.{i:03d}': min(PART, size - i * PART) for i in range((size + PART - 1) // PART)}
     box.makedirs(GAMEDATA)
     have = box.listdir(GAMEDATA) or {}
@@ -139,11 +156,28 @@ def seed_folder(lines):
     return lines[0] if named else None
 
 
+def device_seed(box):
+    """The seed folder the device would start from: the one shader-seed.txt names, when it or its pack is there. None
+    without one."""
+    lines = (box.read(f'{GAMEDATA}/shader-seed.txt') or b'').decode(errors='replace').split('\n')
+    folder, have = seed_folder(lines), box.listdir(GAMEDATA) or {}
+    return folder if folder and (folder in have or f'{folder}.pack.000' in have) else None
+
+
+def seed_fingerprint(seed):
+    """The SHA-256 in a device seed's fingerprint.txt. The folder it is made from has no such file."""
+    file = seed/'fingerprint.txt'
+    require(file.is_file(), f'{file} not found: --seed and the seed command take the device seed, which package_ipa_windows.py '
+            '--seed writes beside the IPA (<name>-shader-seed), not the folder it is made from')
+    fp = file.read_text().strip()
+    require(len(fp) == 64, f'{file} is not a SHA-256')
+    return fp
+
+
 def push_seed(box, seed, log=print, progress=None):
     """The device seed (package_ipa_windows.py --seed, build_ipa.py --image-outside) into Documents/GameData as one pack
     (install_device.py push_seed). Returns what was done."""
-    fp = (seed/'fingerprint.txt').read_text().strip()
-    require(len(fp) == 64, f'{seed}/fingerprint.txt is not a SHA-256')
+    fp = seed_fingerprint(seed)
     box.makedirs(GAMEDATA)
     lines = (box.read(f'{GAMEDATA}/shader-seed.txt') or b'').decode(errors='replace').split('\n')
     have = box.listdir(GAMEDATA) or {}
@@ -360,12 +394,37 @@ def status(box, log=print):
     log(f'saves: {len(remote_files(box, SAVE))} files' + (f', account {account_folder(uid)}' if uid else ', no account.uid'))
 
 
+def seed_to_copy(box, a, ipa, info, installed):
+    """The device seed deploy copies, None when the app carries its shaders or the device has some. A --seed, or the folder
+    beside the IPA, that is no device seed stops the run, and so does having none of these: the app would start to its "No
+    shaders" screen (ios/Sources/main.m)."""
+    seed = a.seed or ipa.with_name(ipa.stem + '-shader-seed')
+    found = a.seed or (seed/'fingerprint.txt').is_file()
+    if found:
+        seed_fingerprint(seed)
+    if info['carries']['seed']:
+        return None
+    if found:
+        return seed
+    require(installed and device_seed(box), f'no shaders: no {seed.name} beside the IPA, none in the app and none on the device. '
+            'Give --seed <name>-shader-seed, which package_ipa_windows.py --seed writes')
+    return None
+
+
 def deploy_app(box, a, ipa, info):
-    """Back up the saves, install, then the image and the shaders the app does not carry, and --mod last."""
+    """Back up the saves, install, then the image and the shaders the app does not carry, and --mod last. What would leave
+    an app that cannot start stops the run first, while the device is as it was."""
     require(a.mod or not a.slot, '--slot goes with --mod')
     if a.mod:
         mod_files(a.mod)   # a mod the game would refuse stops here, before the long steps
-    if box.installed():
+    installed = box.installed()
+    if a.romfs:
+        romfs_sha_size(a.romfs)   # likewise an image push_romfs would refuse
+    else:
+        require(info['carries']['romfs'] or (installed and device_has_image(box)),
+                'no game data: none in the app and none on the device. Give --romfs <romfs.bin>')
+    seed = seed_to_copy(box, a, ipa, info, installed)
+    if installed:
         if not a.no_backup:
             require(a.backup_to, 'the app is installed: give --backup-to <folder> for its saves (or --no-backup)')
             backup_save(box, a.backup_to)
@@ -377,15 +436,11 @@ def deploy_app(box, a, ipa, info):
     if a.romfs:
         push_romfs(box, a.romfs, progress=bar)
     elif not info['carries']['romfs']:
-        marker = (box.read(f'{GAMEDATA}/romfs.sha256') or b'').decode(errors='replace').strip()
-        print('game data: ' + ('the device has an image (romfs.sha256)' if len(marker) == 64 else
-              'none on the device and none in the app: pass --romfs <romfs.bin>'), flush=True)
-    seed = a.seed or ipa.with_name(ipa.stem + '-shader-seed')
-    if not info['carries']['seed']:
-        if (seed/'fingerprint.txt').is_file():
-            push_seed(box, seed, progress=bar)
-        else:
-            print(f'shaders: no {seed.name} beside the IPA and none in the app (package_ipa_windows.py --seed)', flush=True)
+        print('game data: the device has an image', flush=True)
+    if seed:
+        push_seed(box, seed, progress=bar)
+    elif not info['carries']['seed']:
+        print('shaders: the device has a seed', flush=True)
     if a.mod:
         push_mod(box, a.mod, mod_target(a.version, a.slot), progress=bar)
     print('done. A first start after new shaders unpacks them on screen.', flush=True)
