@@ -3,7 +3,7 @@
 (ios/tools/recover_ipa.py, or a work folder of build_app.py), and make the seed's device form.
 
     python games/totk/ios/tools/seed_windows.py tools --work <dir> [--dotnet <dotnet>]
-    python games/totk/ios/tools/seed_windows.py seed --work <dir> --romfs <tree>/extracted/v143/romfs --modules <tree>/rewritten/v143 --version v143
+    python games/totk/ios/tools/seed_windows.py seed --work <dir> --romfs <tree>/extracted/v143/romfs --modules <tree>/rewritten/v143 --version v143 [--extra-list <file>]...
 
 tools: what build_app.py and totk_xlate/publish_native.sh make on the Mac, with Visual Studio (its clang, the C++ tools and
   the linker NativeAOT uses) and the .NET 10 SDK. SPIRV-Cross at the commit build_app.py pins (SPIRV_CROSS), from GitHub's
@@ -14,7 +14,13 @@ tools: what build_app.py and totk_xlate/publish_native.sh make on the Mac, with 
   with the line ends git stores (a Windows clone checks them out with CRLF). Output: <work>/tools/bin (spirv-cross.exe,
   totk_xlate.exe, tools.json), the build logs in <work>/tools/logs.
 seed: scripts/prepare_shader_seed.py with them, into <work>/seed, its caches beside it as on the Mac (seed.inventory,
-  seed.translations, seed.aliases.tsv, seed.verified.json).
+  seed.translations, seed.aliases.tsv, seed.verified.json). --extra-list adds the V rows of a file a device wrote
+  (shader-list-contribution.txt: the bind states it met that the shared list lacks) to this seed only: they join a copy
+  of the shared list, <work>/seed.list.tsv, and the warm-up lists stay the shared list's. A row a variant made before
+  already serves adds no variant (prepare_shader_seed.py plan). The run then prints how many rows the seed serves, with
+  the rule the runtime picks a variant by (totk_shader_rt.m deps_match over <key>.variants), and why the others are not
+  served: a failed translation, or a shader this game version does not have. Without --extra-list the shared list is
+  used as it is.
 
 The device form (device_seed; package_ipa_windows.py --seed makes it beside the IPA with the runtime's translation chain,
 push_device_windows.py copies it into the app's Documents/GameData) is what build_ipa.py puts beside an IPA built with
@@ -32,6 +38,9 @@ TOOLS = Path(__file__).resolve().parent
 TOTK = TOOLS.parents[1]
 REPO = TOTK.parents[1]
 XLATE = TOTK / 'tools/totk_xlate'
+sys.path.insert(0, str(TOTK/'scripts'))
+from prepare_shader_seed import answers_for, deps_match, suffix   # noqa: E402
+from shader_list import KEY, canonical   # noqa: E402
 
 # What the device imports (totk_shader_seed.h totk_seed_import_into): file names, schema 1, a shader count
 SEED_NAME = re.compile(r'^(?:[0-9a-f]{64}\.variants|[0-9a-f]{64}-[0-9a-f]{12}_b\.(?:metal|json|metallib)|pso_manifest\.tsv|shader-keys\.json)$')
@@ -247,19 +256,74 @@ def cmd_tools(a):
     print(f'tools ready in {bin_dir}: ' + ', '.join(f'{n} {d[:12]}' for n, d in record['files'].items()))
 
 
+def extra_rows(paths):
+    """The (shader key, deps) of the V rows of these files, deps in shader_list.py's canonical text. Comments and rows of
+    other kinds (pipelines) are left out; a V row shader_list.py could not read stops it, since dropping it would leave
+    that bind state out of the seed without a word. A file without V rows is the wrong file."""
+    rows = set()
+    for path in paths:
+        found = 0
+        for number, line in enumerate(Path(path).read_text(encoding='utf-8').splitlines(), 1):
+            fields = line.split('\t')
+            if fields[0] != 'V':
+                continue
+            try:
+                deps = canonical(json.loads(fields[2])) if len(fields) == 3 and KEY.match(fields[1]) else None
+            except ValueError:
+                deps = None
+            if deps is None:
+                raise SeedError(f'{path}:{number}: not a shader list V row')
+            rows.add((fields[1], deps)); found += 1
+        if not found:
+            raise SeedError(f'{path}: no V rows')
+    return rows
+
+
+def list_with_rows(rows, path):
+    """path: the shared list with these V rows after its own, for prepare_shader_seed.py --shader-list; a row it has
+    already counts once. Sorted, so the same rows give the same file and a seed made from it is reused."""
+    path.write_bytes(SHADER_LIST.read_bytes() + ''.join(f'V\t{key}\t{deps}\n' for key, deps in sorted(rows)).encode())
+    return path
+
+
+def unserved(seed, rows):
+    """variant -> why, for the rows no variant of the seed serves. A row is served when a row of its shader's .variants
+    matches its bind state, the test the runtime picks a variant with, so a served row is a draw the device does not skip."""
+    failed = {row['variant']: row.get('error') for row in json.loads((seed/'seed-manifest.json').read_bytes()).get('skipped', [])}
+    game = set(json.loads((seed/'shader-keys.json').read_bytes())['keys'])
+    why = {}
+    for key, deps in sorted(rows):
+        answers = answers_for(json.loads(deps))
+        index = seed/f'{key}.variants'
+        variants = json.loads(index.read_bytes()) if index.is_file() else []
+        if not any(deps_match(v.get('deps', {}), answers) for v in variants):
+            variant = f'{key}-{suffix(answers)}'
+            why[variant] = 'this game version has no such shader' if key not in game else \
+                failed.get(variant, 'seed-manifest.json records no failure for it')
+    return why
+
+
 def cmd_seed(a):
     work, bin_dir = a.work.resolve(), a.work.resolve()/'tools/bin'
     for name in ('totk_xlate.exe', 'spirv-cross.exe'):
         if not (bin_dir/name).is_file():
             raise SeedError(f'{bin_dir/name} is missing: run "seed_windows.py tools --work {a.work}" first')
+    extra = extra_rows(a.extra_list)
     cmd = [sys.executable, '-I', '-X', 'utf8', TOTK/'scripts/prepare_shader_seed.py', '--romfs', a.romfs.resolve(),
            '--output', work/'seed', '--translator', bin_dir/'totk_xlate.exe', '--spirv-cross', bin_dir/'spirv-cross.exe',
            '--version', a.version]
     if a.modules:
         cmd += ['--modules', a.modules.resolve()]
+    if extra:
+        cmd += ['--shader-list', list_with_rows(extra, work/'seed.list.tsv')]
     r = subprocess.run([str(c) for c in cmd])   # its progress goes to this console
     if r.returncode:
         raise SeedError(f'prepare_shader_seed.py failed ({r.returncode})')
+    if extra:
+        missing = unserved(work/'seed', extra)
+        print(f'extra lists: the seed serves {len(extra) - len(missing)} of their {len(extra)} V rows')
+        for variant, why in missing.items():
+            print(f'  not served: {variant}: {why}')
     print(f'seed ready in {work/"seed"}: package_ipa_windows.py --seed {work/"seed"} makes its device form')
 
 
@@ -344,6 +408,8 @@ def main():
     s.add_argument('--romfs', type=Path, required=True, help='the folder with romfs.bin and index.json')
     s.add_argument('--modules', type=Path, help='rewritten/<version>: the game modules the shared list locates shaders in')
     s.add_argument('--version', required=True)
+    s.add_argument('--extra-list', type=Path, action='append', default=[],
+                   help='a device\'s shader-list-contribution.txt: its V rows join this seed; may be given again')
     for x in (t, s):
         x.add_argument('--work', type=Path, required=True, help='the folder that holds tools/ and seed/')
     a = p.parse_args()
