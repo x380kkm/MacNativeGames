@@ -29,9 +29,11 @@ a restore first backs up what the device has (beside the backup, or into --safet
 The files on the device follow ios/Sources/main.m and install_device.py: the image as romfs.bin.000, .001, ... of 1 GiB
 (runtime/romfs.c: equal parts, the last one shorter), with romfs.sha256 saying "copying <sha256>" until every part is
 there and the image's SHA-256 (index.json romfs_sha256) last; a copy that stopped goes on from the parts at their full
-size. The shaders as one stream, <folder>.pack.000, ... (main.m seed_unpack, install_device.py write_pack), after
-shader-seed.txt says "stale" and before it says "<folder>\\n<fingerprint>"; the app unpacks it on its next start. A
-marker is written to a temporary name and renamed, so the app never reads half of one.
+size. The shaders as one stream, <folder>.pack.000, ... (main.m seed_unpack, install_device.py write_pack), then
+shader-seed.txt saying "<folder>\\n<fingerprint>"; the app unpacks it on its next start. Until that last write the marker
+goes on naming the seed the device has, so a copy that stopped leaves that seed in use, and the parts it left go at the
+app's next start, or at the start of the next copy, which also clears those of a marker saying "stale" (an earlier copy
+of this tool, install_device.py). A marker is written to a temporary name and renamed, so the app never reads half of one.
 
 A player's RomFS mod (scripts/make_button_icons.py, make_mod_manifest.py) goes into Documents/mods/<version> (v143 for
 1.4.3, runtime/game_version.h TOTK_GAME_DIR), which main.m hands to the runtime when it holds a manifest.tsv. push-mod
@@ -63,6 +65,7 @@ MOD_VERSIONS = ('v0', 'v112', 'v121', 'v143', 'botw160', 'botw190')   # TOTK_GAM
 MOD_VERSION = 'v143'   # the version package_ipa_windows.py packages
 MOD_SLOTS = ('off', 'moderate', 'strong', 'max')   # the values of the Settings pane's TOTK_MOD_SLOT row (Root.plist)
 COPYING = 'manifest.tsv.copying'   # the manifest of a mod copy that has not finished; the app reads manifest.tsv only
+SEED_PART = re.compile(r'(shader-seed-.+)\.pack\.\d+')   # a part of a shader pack, and the folder it unpacks into
 # A manifest line as runtime/romfs.c overlay_load reads it: path, size, SHA-256, the original's SHA-256 or "-" for an added file.
 MANIFEST_LINE = re.compile(r'([^\t\n]{1,4095})\t(\d+)\t([0-9a-f]{64})\t([0-9a-f]{64}|-)(?![0-9a-f-])')
 PART = install_device.PART
@@ -130,6 +133,12 @@ def push_romfs(box, image, log=print, progress=None):
     return 'copied'
 
 
+def seed_folder(lines):
+    """The folder the lines of shader-seed.txt name, as ios/Sources/main.m reads them; None without one (no marker, "stale")."""
+    named = len(lines) >= 2 and len(lines[1]) == 64 and lines[0].startswith('shader-seed-') and '/' not in lines[0]
+    return lines[0] if named else None
+
+
 def push_seed(box, seed, log=print, progress=None):
     """The device seed (package_ipa_windows.py --seed, build_ipa.py --image-outside) into Documents/GameData as one pack
     (install_device.py push_seed). Returns what was done."""
@@ -144,12 +153,21 @@ def push_seed(box, seed, log=print, progress=None):
     names = sorted(p.name for p in seed.iterdir() if p.is_file())
     total = sum((seed/n).stat().st_size for n in names)
     log(f'shaders: copying {len(names)} files, {total / 2**30:.1f} GiB, as one pack (once per shader list)')
-    box.write(f'{GAMEDATA}/shader-seed.txt', b'stale\n')   # until every part is there
+    in_use = seed_folder(lines)
+    for name in sorted(have):   # what a stopped copy left: nothing will read it, and this copy needs the room
+        stopped = SEED_PART.fullmatch(name)
+        if stopped and stopped.group(1) != in_use:
+            box.remove(f'{GAMEDATA}/{name}')
+    sizes = {}
     def push(part):
-        box.upload(f'{GAMEDATA}/{part.name}', part, 0, None, progress and progress(part.stat().st_size, part.name))
+        sizes[part.name] = part.stat().st_size
+        box.upload(f'{GAMEDATA}/{part.name}', part, 0, None, progress and progress(sizes[part.name], part.name))
         part.unlink()
     with tempfile.TemporaryDirectory(dir=seed.parent) as d:   # 1 GiB parts beside the seed, not on the system disk
         install_device.write_pack(seed, names, Path(d), folder, PART, push)
+    now = box.listdir(GAMEDATA) or {}   # the game started meanwhile: it removes what the marker does not name yet
+    short = [n for n, s in sizes.items() if now.get(n, (None,))[0] != s]
+    require(not short, f'parts with the wrong size on the device after copying: {short}; run this again')
     box.write(f'{GAMEDATA}/shader-seed.txt', f'{folder}\n{fp}\n'.encode())
     return 'copied'
 

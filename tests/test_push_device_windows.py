@@ -4,6 +4,7 @@ shaders as one pack read back as ios/Sources/main.m seed_unpack reads it, and sa
 account. No device and no game files."""
 import contextlib
 import hashlib
+import itertools
 import io
 import json
 import os
@@ -138,6 +139,83 @@ class Push(unittest.TestCase):
         self.assertEqual(read_pack(parts), (files, True))
         self.assertEqual(sorted(p.name for p in seed.parent.iterdir() if p.name.startswith('tmp')), [])   # parts beside the seed are gone
         self.assertEqual(push.push_seed(self.box, seed, log=quiet), 'present')
+
+    def seed(self, fingerprint):
+        """A seed folder that makes a pack of several parts, each attempt at it named apart from the one before."""
+        push.PART = 777
+        seed = self.root/f'{fingerprint}-shader-seed'; seed.mkdir()
+        (seed/'fingerprint.txt').write_text(fingerprint * 64 + '\n')
+        for i in range(1, 8):
+            (seed/f'{i}_b.metal').write_bytes(bytes([i]) * (300 * i))
+        clock = itertools.count(1000)
+        patcher = patch.object(push.time, 'time', lambda: next(clock))
+        patcher.start(); self.addCleanup(patcher.stop)
+        return seed
+
+    def stop_copy(self, seed, after):
+        self.box.stop = len(self.box.uploads) + after
+        with self.assertRaises(OSError):
+            push.push_seed(self.box, seed, log=quiet)
+        self.box.stop = None
+
+    def parts_of(self, fingerprint):
+        return sorted(p.name for p in self.device().glob(f'shader-seed-{fingerprint * 12}-*.pack.*'))
+
+    def test_a_stopped_seed_copy_leaves_the_seed_on_the_device_in_use(self):
+        old, new = self.seed('a'), self.seed('b')
+        push.push_seed(self.box, old, log=quiet)
+        marker, kept = self.device('shader-seed.txt').read_bytes(), self.parts_of('a')
+        self.stop_copy(new, 2)
+        self.assertEqual(self.device('shader-seed.txt').read_bytes(), marker)   # main.m goes on reading the old seed
+        self.assertEqual(self.parts_of('a'), kept)
+        self.assertEqual(len(self.parts_of('b')), 2)
+
+    def test_a_copy_after_a_stopped_one_starts_with_the_room_that_one_took(self):
+        old, new = self.seed('a'), self.seed('b')
+        push.push_seed(self.box, old, log=quiet)
+        kept = self.parts_of('a')
+        for _ in range(3):
+            self.stop_copy(new, 2)
+            self.assertEqual(len(self.parts_of('b')), 2)
+            self.assertEqual(self.parts_of('a'), kept)
+        self.box.ops.clear()
+        self.assertEqual(push.push_seed(self.box, new, log=quiet), 'copied')
+        kinds = [kind for kind, _ in self.box.ops]
+        self.assertLess(kinds.index('remove'), kinds.index('upload'))
+        self.assertEqual(self.box.ops[-1], ('write', f'{push.GAMEDATA}/shader-seed.txt'))
+        self.assertEqual(kinds.count('write'), 1)   # the marker changes once, when every part is there
+        folder = self.device('shader-seed.txt').read_text().split('\n')[0]
+        self.assertTrue(all(n.startswith(folder + '.pack.') for n in self.parts_of('b')), self.parts_of('b'))
+        self.assertEqual(read_pack(sorted(self.device().glob(folder + '.pack.*')))[1], True)
+        self.assertEqual(self.parts_of('a'), kept)   # the app removes these at its next start
+
+    def test_a_copy_clears_what_a_stale_marker_left_behind(self):
+        new = self.seed('b')
+        self.box.makedirs(push.GAMEDATA)
+        self.box.write(f'{push.GAMEDATA}/shader-seed.txt', b'stale\n')   # an earlier copy, or install_device.py
+        (self.device('shader-seed-cccccccccccc-1').mkdir())               # the seed that marker replaced, unpacked
+        (self.device('shader-seed-cccccccccccc-1/seed-manifest.json')).write_text('{}')
+        for name in ('shader-seed-dddddddddddd-2.pack.000', 'shader-seed-dddddddddddd-2.pack.001'):
+            self.device(name).write_bytes(b'part')
+        self.assertEqual(push.push_seed(self.box, new, log=quiet), 'copied')
+        self.assertEqual(self.parts_of('d'), [])
+        self.assertTrue(self.device('shader-seed-cccccccccccc-1/seed-manifest.json').is_file())   # the app's to remove
+        self.assertNotIn('stale', self.device('shader-seed.txt').read_text())
+
+    def test_a_part_gone_during_the_copy_keeps_the_marker(self):
+        """The game started during the copy and removed what its marker does not name (main.m), so the pack is not whole."""
+        old, new = self.seed('a'), self.seed('b')
+        push.push_seed(self.box, old, log=quiet)
+        marker = self.device('shader-seed.txt').read_bytes()
+        upload = self.box.upload
+        def app_starts(rel, *args, **kw):
+            upload(rel, *args, **kw)
+            if rel.endswith('.pack.001'):
+                self.device(rel.rsplit('/', 1)[1].replace('.001', '.000')).unlink()
+        self.box.upload = app_starts
+        with self.assertRaisesRegex(push.PushError, r'\.pack\.000.*run this again'):
+            push.push_seed(self.box, new, log=quiet)
+        self.assertEqual(self.device('shader-seed.txt').read_bytes(), marker)
 
     def test_saves_come_back_with_their_account(self):
         save = self.root/'device'/push.SAVE
