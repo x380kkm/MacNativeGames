@@ -30,8 +30,8 @@ void *runtime_time_override(const char *name);
 void *runtime_applet_override(const char *name);
 void *runtime_swkbd_override(const char *name);   /* runtime/swkbd_host.c: nn::swkbd text entry with keyboard or controller */
 void runtime_swkbd_probe(void);
-void runtime_swkbd_selftest(void);
-void runtime_dump_threads(void);   /* threads.c: every guest thread's wait state and guest return chain (TOTK_INPUT_FILE "threads") */   /* diagnostic "kbtest": show the text entry bar from a thread of its own */
+void runtime_swkbd_selftest(void);   /* diagnostic "kbtest": ask for text the way the game names a horse, from a thread of its own */
+void runtime_dump_threads(void);   /* threads.c: every guest thread's wait state and guest return chain (TOTK_INPUT_FILE "threads") */
 void runtime_frame_step_pin(double ms);                  /* game_patches.c: pin the real-time frame step (diagnostics), 0 = real time */
 void runtime_frame_step_update(uint64_t now_ns);
 void runtime_thread_note_hle(unsigned index);            /* threads.c: the calling guest thread's last host call (hletrace) */
@@ -187,8 +187,10 @@ void runtime_mouse_release(void);                   /* main thread: buttons up, 
 void runtime_touch_pad_set(const RuntimeGamepadState *state);   /* on-screen touch controls (iOS) */
 int runtime_phone_fps(void);                /* d2r_gfx hle_nvn.c, iPhone / iPad: 30 while held at 30 (TOTK_PHONE_FPS), else 60 */
 void runtime_phone_fps_set(int fps);        /* 30 holds 30, anything else up to 60: the touch controls' button, at once */
-/* Controller rumble and motion (opt-in TOTK_RUMBLE=1 / TOTK_GYRO=1): the game's hid side in runtime/hid_feedback.c, the
-   Mac controller's haptics and motion sensors in runtime/gamepad_feedback.m. */
+/* Controller rumble and motion: on by default, off with TOTK_RUMBLE=0 / TOTK_GYRO=0, and without the variable in an agent's
+   test session or with rumble.txt / gyro.txt saying off (runtime/feedback_settings.h). The game's hid side is in
+   runtime/hid_feedback.c, a controller's haptics and motion sensors in runtime/gamepad_feedback.m (Mac, iPhone and iPad),
+   the device's own motion sensor and vibration in ios/Sources/phone_motion.m and ios/Sources/phone_haptics.m. */
 #define RUNTIME_MOTION_MAX 32
 typedef struct { uint64_t sampling, delta_ns; float acc[3], gyro[3], angle[3], dir[9]; } RuntimeMotionState;   /* G, rev/s, rev, 3 axes */
 int runtime_rumble_enabled(void);

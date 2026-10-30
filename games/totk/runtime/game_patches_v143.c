@@ -253,6 +253,13 @@ static void patch_fade_increment(Module *m){
     uint32_t jump_s3=branch(0x6155e4,stub+48);
     uint32_t jump_s4=branch(0x615660,stub+64);
 #if TARGET_OS_IPHONE
+    /* Code sections exported before this fix (an app repackaged on Windows from one built at 30a1b93) have the original
+       instructions and an empty stub: the game's own counters stay, as patch_render_res keeps the game's size. The display
+       link paces the game at 60 Hz on iOS (frontend_ios.m TOTK_IOS_LINK_HZ), below the ~63.5 FPS where the increment is 0. */
+    int original=1;
+    for(unsigned i=0;i<sizeof guards/sizeof *guards;i++){uint32_t w;memcpy(&w,m->base+guards[i].off,4);if(w!=guards[i].original)original=0;}
+    for(unsigned i=0;i<sizeof veneer;i++)if(m->base[stub+i])original=0;
+    if(original){fprintf(stderr,"[totk] 1.4.3 high-FPS fix: fade counters the game's own (not patched at build)\n");return;}
     uint32_t got[8];
     for(unsigned i=0;i<4;i++)memcpy(got+i,m->base+0x0a7ac4+4*i,4);
     for(unsigned i=0;i<2;i++)memcpy(got+4+i,m->base+0x95dd24+4*i,4);

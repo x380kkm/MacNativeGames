@@ -54,9 +54,10 @@ void runtime_boot_status(const char *stage,const char *detail){
  NSString *d=[NSString stringWithUTF8String:detail?detail:TOTK_UI("正在处理，请稍候","Working, please wait")];
  dispatch_async(dispatch_get_main_queue(), ^{if(!bootOverlay||bootOverlay.hidden)return;bootStage.text=s;bootDetail.text=d;bootProgress.hidden=YES;});
 }
-/* Shader and pipeline warm-up progress (nvn_mtl.m warm_start), shown while the start-up screen is up: the title waits for
-   the warm-up on iOS as on the Mac (TOTK_WARM_BEFORE_TITLE). While the shader libraries are compiled on the device, the
-   pipeline archive fill reports through runtime_boot_count instead (warm_fill_progress). */
+/* Shader and pipeline warm-up progress (nvn_mtl.m warm_start), shown while the start-up screen is up: on iOS the title
+   waits for the warm-up (TOTK_WARM_BEFORE_TITLE), also with a complete pipeline archive, where the Mac no longer waits.
+   While the shader libraries are compiled on the device, the pipeline archive fill reports through runtime_boot_count
+   instead (warm_fill_progress). */
 void runtime_warm_progress(uint64_t done,uint64_t total,uint64_t shaders,uint64_t shader_total,uint64_t pipelines,uint64_t pipeline_total){
  (void)shaders;(void)shader_total;(void)pipelines;(void)pipeline_total;
  dispatch_async(dispatch_get_main_queue(), ^{

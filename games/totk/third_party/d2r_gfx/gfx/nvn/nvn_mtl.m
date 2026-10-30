@@ -8473,9 +8473,9 @@ static _Atomic int g_warm_in_play;
 /* iOS: the startup shaders came without device libraries, so every library is compiled here from its MSL (shader_load).
    Such a seed is made where there is no Metal compiler, e.g. on Windows (ios/tools/seed_windows.py: seed-manifest.json
    ios_metallibs 0, no <variant>_b.metallib). The first start then compiles what the pipeline lists name before the title
-   (warm_fill_archive; TOTK 1.4.3: 17,395 libraries for 22,591 pipelines) at 80-225 ms per library with a cold Metal cache
-   (variant_library). Set first by warm_start (warm_libraries_missing), before any warm-up thread runs and before any
-   pipeline opens the pipeline archive, whose identity names it (par_identity). The compiles go to the system compiler
+   (warm_fill_archive; TOTK 1.4.3, lists of 2026-10-30: 20,003 libraries for 27,440 pipelines) at 80-225 ms per
+   library with a cold Metal cache (variant_library). Set first by warm_start (warm_libraries_missing), before any
+   warm-up thread runs and before any pipeline opens the pipeline archive, whose identity names it (par_identity). The compiles go to the system compiler
    service, which runs requests side by side (on the Mac 8 threads made a cold warm-up 4.6 times quicker,
    above), so the default is half the cores, 2 to 4: an iPad with an M4 has 9 or 10 cores, 3 or 4 of them performance
    cores; an iPhone has 6. Not more: every open compile takes memory in that service, which the system has stopped under
@@ -8671,11 +8671,20 @@ static void warm_task_done(uint64_t *done,uint64_t total,uint64_t shader_total,u
     if (runtime_warm_progress && (!(*done % 64) || *done == total))
         runtime_warm_progress(*done,total,dict.count,shader_total,g_warm_rps+g_warm_cps,pipeline_total);
 }
+/* The variant a B / T row's pipeline is keyed by (pso_archive_key): "B:" and the row's vertex and fragment border
+   recipes, or "T:" and its aid:att pairs. */
+static NSString *row_variant(NSArray<NSString *> *c) {
+    return [c[0] isEqualToString:@"B"] ? [NSString stringWithFormat:@"B:%@\t%@", c[2], c[3]] : [@"T:" stringByAppendingString:c[2]];
+}
 /* Whether the pipeline archive has a B / T row's pipeline, from the row alone (the key pso_archive_key gives it: a fragment
-   variant sets fz, a vertex border variant PSO_VBORDER), so the fill skips it without loading its shaders. */
-static int par_row_have(const pso_skey *sk, int vborder, int fz, NSString *variant) {
+   variant sets fz, a vertex border variant PSO_VBORDER), so the fill skips it without loading its shaders. A B row has
+   the vertex variant unless its vertex recipe is "-", and the fragment one unless its fragment recipe is; a T row has
+   the fragment variant only. */
+static int par_row_have(NSArray<NSString *> *c, const pso_skey *sk) {
+    int border = [c[0] isEqualToString:@"B"];
+    int vborder = border && ![c[2] isEqualToString:@"-"], fz = !border || ![c[3] isEqualToString:@"-"];
     pso_skey ak = *sk; memset(&ak.fz_desc, 0, sizeof ak.fz_desc); ak.fz = fz != 0; if (vborder) ak.k.a2c |= PSO_VBORDER;
-    NSMutableData *b = [NSMutableData dataWithBytes:&ak length:sizeof ak]; [b appendData:[variant dataUsingEncoding:NSUTF8StringEncoding]];
+    NSMutableData *b = [NSMutableData dataWithBytes:&ak length:sizeof ak]; [b appendData:[row_variant(c) dataUsingEncoding:NSUTF8StringEncoding]];
     NSString *key = par_hash(b.bytes, b.length);
     pthread_mutex_lock(&g_par_mu); BOOL have = [g_par_have containsObject:key]; pthread_mutex_unlock(&g_par_mu);
     return have;
@@ -8684,8 +8693,7 @@ static int par_row_have(const pso_skey *sk, int vborder, int fz, NSString *varia
    keep 0 (warm_fill_archive): built into the pipeline archive and dropped; 2 when the archive has it already. */
 static int warm_border(NSArray<NSString *> *c, NSMutableDictionary<NSString *, NvShader *> *dict, int keep) {
     pso_skey sk; if (pso_skey_parse(c[1].UTF8String, &sk) || sk.merged || sk.fz) return 0;
-    NSString *variant = [NSString stringWithFormat:@"B:%@\t%@", c[2], c[3]];
-    if (!keep && par_row_have(&sk, ![c[2] isEqualToString:@"-"], ![c[3] isEqualToString:@"-"], variant)) return 2;
+    if (!keep && par_row_have(c, &sk)) return 2;
     NSString *vkey = warm_key(sk.vs, sizeof sk.vs), *fkey = warm_key(sk.fs, sizeof sk.fs);
     NvShader *vs = vkey.length ? warm_shader(dict, vkey, sk.vs_stage) : nil, *fs = fkey.length ? warm_shader(dict, fkey, sk.fs_stage) : nil;
     int hv = ![c[2] isEqualToString:@"-"], hf = ![c[3] isEqualToString:@"-"];
@@ -8698,7 +8706,7 @@ static int warm_border(NSArray<NSString *> *c, NSMutableDictionary<NSString *, N
     pso_key k = sk.k; k.vs = (__bridge void *)(hv ? vfn : (id)vs); k.fs = (__bridge void *)fs; k.fsfn = (__bridge void *)bfn;
     if (hv) k.a2c |= PSO_VBORDER;
     NSError *e = nil; uint64_t ps_started = bp_now();
-    id ps = pso_new(pso_desc(&k, vs, fs, bfn, 0), pso_archive_key(&k, vs, fs, 0, variant), &e);
+    id ps = pso_new(pso_desc(&k, vs, fs, bfn, 0), pso_archive_key(&k, vs, fs, 0, row_variant(c)), &e);
     atomic_fetch_add(&g_warm_pipeline_ns, bp_now() - ps_started); atomic_fetch_add(&g_warm_pipeline_count, 1);
     if (!ps) return 0;
     if (!keep) return 1;
@@ -8712,8 +8720,7 @@ static int warm_border(NSArray<NSString *> *c, NSMutableDictionary<NSString *, N
    keep 0 (warm_fill_archive): built into the pipeline archive and dropped; 2 when the archive has it already. */
 static int warm_tileread(NSArray<NSString *> *c, NSMutableDictionary<NSString *, NvShader *> *dict, int keep) {
     pso_skey sk; if (pso_skey_parse(c[1].UTF8String, &sk) || sk.merged || sk.fz) return 0;
-    NSString *variant = [@"T:" stringByAppendingString:c[2]];
-    if (!keep && par_row_have(&sk, 0, 1, variant)) return 2;
+    if (!keep && par_row_have(c, &sk)) return 2;
     NSString *vkey = warm_key(sk.vs, sizeof sk.vs), *fkey = warm_key(sk.fs, sizeof sk.fs);
     NvShader *vs = vkey.length ? warm_shader(dict, vkey, sk.vs_stage) : nil, *fs = fkey.length ? warm_shader(dict, fkey, sk.fs_stage) : nil;
     if (!vs || !fs) return 0;
@@ -8728,7 +8735,7 @@ static int warm_tileread(NSArray<NSString *> *c, NSMutableDictionary<NSString *,
     if (!fn) return 0;
     pso_key k = sk.k; k.vs = (__bridge void *)vs; k.fs = (__bridge void *)fs; k.fsfn = (__bridge void *)fn;
     NSError *e = nil; uint64_t ps_started = bp_now();
-    id ps = pso_new(pso_desc(&k, vs, fs, fn, 0), pso_archive_key(&k, vs, fs, 0, variant), &e);
+    id ps = pso_new(pso_desc(&k, vs, fs, fn, 0), pso_archive_key(&k, vs, fs, 0, row_variant(c)), &e);
     atomic_fetch_add(&g_warm_pipeline_ns, bp_now() - ps_started); atomic_fetch_add(&g_warm_pipeline_count, 1);
     if (!ps) return 0;
     if (!keep) return 1;
@@ -9038,9 +9045,9 @@ static void fill_row(NSString *line, NSMutableDictionary<NSString *, NvShader *>
     if (!ps) atomic_fetch_add(&fc->nfail, 1);
 }
 /* TOTK (iOS, libraries compiled here: g_warm_from_source): whether the fill before the title builds this row, decided
-   before any of its libraries is compiled. R and C rows the archive has and rows whose shaders the cache lacks are passed
-   over and counted as fill_row counts them; B and T rows whose shaders the cache has go on, and fill_row asks the archive
-   for them once their shaders are loaded (they are few). */
+   before any of its libraries is compiled. Rows the archive has (B and T rows too, par_row_have), rows fill_row would not
+   build and rows whose shaders the cache lacks are passed over and counted as fill_row counts them, so a start whose
+   archive has every row loads no library. */
 static int fill_wanted(NSString *line, fill_counts *fc) {
     NSArray<NSString *> *c = [line componentsSeparatedByString:@"\t"];
     if (c.count < 2) return 0;
@@ -9050,8 +9057,13 @@ static int fill_wanted(NSString *line, fill_counts *fc) {
         if (!warm_available(c[1])) { atomic_fetch_add(&fc->nfail, 1); return 0; }
         return 1;
     }
+    int border = [c[0] isEqualToString:@"B"], tile = [c[0] isEqualToString:@"T"];
+    if ((border && c.count < 4) || (tile && c.count < 3)) return 0;
     pso_skey sk; if (pso_skey_parse(c[1].UTF8String, &sk)) return 0;
-    if ([c[0] isEqualToString:@"R"]) {
+    if (border || tile) {
+        if (sk.merged || sk.fz) { atomic_fetch_add(&fc->nfail, 1); return 0; }   // warm_border / warm_tileread build neither
+        if (par_row_have(c, &sk)) { atomic_fetch_add(&fc->nhave, 1); return 0; }
+    } else {
         if (sk.fz) return 0;
         if (fill_have_r(&sk)) { atomic_fetch_add(&fc->nhave, 1); return 0; }
     }
