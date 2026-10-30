@@ -187,10 +187,18 @@ So on iPhone and iPad a report nobody can vouch for reads 1, the smallest count 
 zero or non-zero, and a light it scales by the count stays dark. Two kinds of report are raised:
 
 - a report not known to be complete: a counted draw never reached its counter (its shader, pipeline, pass or counter slot
-  was missing), or a command buffer of the submission failed;
-- every report of a frame in which all queries came to 0. Such a frame cannot be told from counters that did not count.
+  was missing), or a command buffer of the submission failed. A failed chunk is found by its fence, which relies on its
+  completion handler running before the submission's final one;
+- every report of a frame in which all queries came to 0, and the reports at 0 in the 30 frames with queries after it. A
+  frame of nothing but zeros cannot be told from counters that did not count, and one report above 0 in the next frame says
+  nothing about the zeros beside it. Without those frames an object whose zeros are false would flip between shown and
+  hidden.
   An iPad run (2026-10-30, 835 to 903 s) had 9 to 13 queries per submission, nearly all frames with every one at 0 and no
-  draw skipped; the log cannot say whether they were true.
+  draw skipped; the log cannot say whether they were true. The 30 frames, half a second at 60 frames per second, are a
+  choice and not a measurement.
+
+Zeros elsewhere are trusted, so a false zero there is not caught: the same run has stretches of 11 queries per frame with
+10 at 0 and no frame of nothing but zeros, and the log cannot say whether those zeros are true either.
 
 `TOTK_OCCL_GUARD=0` turns this off, and `TOTK_OCCL_GUARD=1` turns it on on the Mac, where it is off by default. A draw held
 back while its shader is prepared raises its report on every platform, whatever the switch says. The `[occl]` line in the
