@@ -176,9 +176,10 @@ the copy nothing was drawn through overwrites the other, in a different order pe
 Wild's albedo). This is true of any tile-based GPU.
 
 The Breath of the Wild build leaves the second slot unattached. A pipeline names every slot's format and write mask, so
-here that would give each draw of the pass a key that no row of the seed or the archive has, and the warm-up would build
-pipelines that play no longer asks for. So on iPhone and iPad both slots stay attached and only the store changes: the first slot a draw wrote through is stored, or the first slot if none was, and the
-other copy is stored as DontCare. A draw writes through a slot once its primitives are in the encoder, the slot's channels
+in Tears of the Kingdom that would give each draw of the pass a pipeline key that no row of the seed or the archive has,
+and the warm-up would build pipelines that play no longer asks for. So Tears of the Kingdom on iPhone and iPad keeps both
+slots attached and only the store changes: the first slot a draw wrote through is stored, or the first slot if none was,
+and the other copy is stored as DontCare. A draw writes through a slot once its primitives are in the encoder, the slot's channels
 are open and the fragment shader outputs to it (`deps.fout` in the shader's reflection), so a depth-only draw or one with no
 primitives decides nothing. Pipelines, the archive and the warm-up are untouched. A clear reaches every copy when it is
 recorded, because which one is stored is known only at the end of the pass, and of two clears through different slots the
@@ -192,7 +193,8 @@ rules.
 
 `TOTK_RT_DUP=0` turns this off; on iPhone and iPad, Settings › Apps › Tears of the Kingdom › Graphics troubleshooting › One
 image at two colour slots › Off sets it. `TOTK_RT_DUP=1` turns it on on the Mac. Apple's Mac GPUs are tile-based too, so the
-rule holds there, but the Mac default stays off until it has been compared on one.
+rule holds there, but the Mac default stays off until it has been compared on one. A Breath of the Wild build leaves this
+off by default, and its Settings pane has no such row.
 
 ## Occlusion queries
 
