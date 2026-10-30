@@ -10,7 +10,7 @@ no game content, keys or mod code.
 | Content of the pack | Where it goes | What reads it |
 | --- | --- | --- |
 | an extra code module (`subsdk1`, a hooking framework's `subsdk9`) | - | not loaded by this app; the build prints which module it left out |
-| the `exefs/` patch for `main` | merged into `main` by `--mod` at build time, or applied at start with `TOTK_PCHTXT` | build / app |
+| the `exefs/` patch for `main` | merged into `main` by `--mod` at build time, or, on 1.0.0 to 1.2.1, applied at start with `TOTK_PCHTXT` | build / app |
 | ordinary RomFS files | `~/Library/Application Support/MacNativeGames/TOTK/mods/<version>/` | `TOTK_ROMFS_MODS`, set by the launcher |
 | RomFS files whose path the app replaces itself | merged by `make_mod_manifest.py`, or folded in by `--mod` (the heap table) | app |
 
@@ -38,9 +38,9 @@ and the file itself:
 ```
 
 `@flag offset_shift 0x100` is not optional: the addresses in a pchtxt are `main` addresses, while an IPS offset counts
-the 0x100-byte NSO header. Both routes below stop the start when the flag is missing or names another shift, instead of
-letting every patch land 0x100 bytes off. The build id is read from `extracted/<version>/exefs/main` at offset 0x40 and
-differs per game version.
+the 0x100-byte NSO header. When the flag is missing or names another shift, `--mod` stops the build and `TOTK_PCHTXT`, on
+the versions that read it, stops the start, instead of letting every patch land 0x100 bytes off. The build id is read from
+`extracted/<version>/exefs/main` at offset 0x40 and differs per game version.
 
 Two routes, pick one:
 

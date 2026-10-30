@@ -447,8 +447,9 @@ never checks and Metal refuses to build; the app caps the chain at what the dime
 These come from how a pack was built, not from its content, and none of them prints one of the lines above.
 
 - **A `.pchtxt` without `@flag offset_shift 0x100`.** Its addresses are `main` addresses, while an IPS file's offsets
-  count the 0x100-byte NSO header. Both `TOTK_PCHTXT` and `--mod` stop the start when a patch line comes before that
-  flag, or when it names another shift: the alternative is every byte landing 0x100 bytes off without an error.
+  count the 0x100-byte NSO header. When a patch line comes before that flag, or it names another shift, `--mod` stops the
+  build and `TOTK_PCHTXT`, on the versions that read it, stops the start: the alternative is every byte landing 0x100 bytes
+  off without an error.
   Converting an IPS by hand: `main address = IPS32 offset - 0x100`.
 - **A `.zs` whose zstd frame does not declare its content size.** The game's decompressor has no size to read for those
   and decompresses to a null destination: the window dies right after `ENTER nnMain` and the log holds nothing of ours.
@@ -842,8 +843,8 @@ support 1”）。mip 级数超过尺寸允许的贴图在 Switch 上没人检�
 这三处出在包的打包方式上，而不是包的内容；它们都不会打印上面那些行。
 
 - **`.pchtxt` 缺 `@flag offset_shift 0x100`。** 文件里的地址是 `main` 地址，而 IPS 的偏移把 0x100 字节的 NSO 头也算了进去。
-  补丁行出现在这个 flag 之前、或写的不是 0x100，`TOTK_PCHTXT` 和 `--mod` 都会直接停止启动——否则每个字节都会静默地
-  偏 0x100 落错位置。手工把 IPS 转成 pchtxt：`main 地址 = IPS32 偏移 - 0x100`。
+  补丁行出现在这个 flag 之前、或写的不是 0x100 时，`--mod` 会让构建停止，`TOTK_PCHTXT` 在读取它的版本上会停止启动——否则
+  每个字节都会静默地偏 0x100 落错位置。手工把 IPS 转成 pchtxt：`main 地址 = IPS32 偏移 - 0x100`。
 - **`.zs` 的 zstd 帧没有声明内容大小。** 游戏的解压器无从得知解压后多大，会解到空指针上：窗口在 `ENTER nnMain` 之后
   立刻消失，日志里没有我们这边的任何一行。`zstd` 从管道压缩（`zstd -c`）时会写出这种帧；帧头描述符字节（`raw[4]`）
   的 bit7-6 必须非 0。改为对字节数组调用库压缩，断言 `(raw[4] >> 6) & 3`，窗口大小、校验和、字典都与被替换的原文件
