@@ -12,8 +12,9 @@ on those sections the device's checks keep the game's own counters and scene siz
 tool makes the sections again from the pinned rewrites. It builds export_ios_host.c with game_patches_v143.c twice with clang,
 darwin_shim standing in for the Darwin headers that file includes for its Mac diagnostics:
  - the export (without --check): checks <tree>/rewritten/v143/<module>.patched.bin against assets/expected-v1.4.3.json,
-   runs the Mac patch path with build_ipa.py's environment (TOTK_EXPORT_IOS=<out>, TOTK_RENDER_RES=1280x720, no other
-   TOTK_* variable) and writes the nine sections gen_embed.py embeds into <out> (default <tree>/build/export-ios, where
+   runs the Mac patch path with the two variables build_ipa.py sets for its export (TOTK_EXPORT_IOS=<out>,
+   TOTK_RENDER_RES=1280x720) and no other TOTK_* variable (build_ipa.py passes the shell's on, so this equals a Mac build
+   from a shell without TOTK_* variables) and writes the nine sections gen_embed.py embeds into <out> (default <tree>/build/export-ios, where
    package_ipa_windows.py takes them from): <module>.x0.bin and <module>.x1.bin as loader.c export_ios_text writes them,
    <module>.w.bin the image between them as gen_embed.py takes it. Then layout.json (gen_embed.py --layout-of; the
    runtime the ios-runtime workflow builds carries the hashes of ios/ci/embed-layout-v143.json, which must be this
@@ -25,8 +26,8 @@ darwin_shim standing in for the Darwin headers that file includes for its Mac di
 The tree's fixups.tsv give each module's layout and its image the file size, as for gen_embed.py. Logs: <out>/build.log,
 export-ios.log and check-ios.log; --check prints its log. The sections are game code: never commit or upload them.
 
-Windows only: darwin_shim fills in for the Microsoft C library (Visual Studio's C++ Clang tools: clang.exe from PATH,
---clang, or found with vswhere). On a Mac build_ipa.py runs the loader's own export-ios."""
+Windows only: darwin_shim fills in for the Microsoft C library (Visual Studio's C++ Clang tools: --clang, else found
+with vswhere, else clang.exe from PATH). On a Mac build_ipa.py runs the loader's own export-ios."""
 import argparse, hashlib, json, os, shutil, subprocess, sys, tempfile
 from pathlib import Path
 
@@ -79,12 +80,11 @@ def source_digest(path):
 
 
 def find_clang(given):
-    """--clang, else clang on PATH, else the newest Visual Studio's C++ Clang tools (vswhere)."""
+    """--clang, else the newest Visual Studio's C++ Clang tools (vswhere), else clang on PATH; darwin_shim is written for
+    the Microsoft C library those tools target."""
     if given:
         require(Path(given).is_file() or shutil.which(given), f'{given}: no such compiler')
         return str(given)
-    if shutil.which('clang'):
-        return shutil.which('clang')
     vswhere = Path(os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)'))/'Microsoft Visual Studio/Installer/vswhere.exe'
     if vswhere.is_file():
         found = subprocess.run([str(vswhere), '-latest', '-products', '*', '-find', r'VC\Tools\Llvm\x64\bin\clang.exe'],
@@ -92,6 +92,8 @@ def find_clang(given):
         found = [f.strip() for f in found if f.strip()]
         if found:
             return found[0]
+    if shutil.which('clang'):
+        return shutil.which('clang')
     raise ExportError('clang not found: install Visual Studio\'s "C++ Clang tools for Windows" or give --clang')
 
 
@@ -164,7 +166,7 @@ def check(host, sections, layouts, log, what):
 
 
 def write_sections(host, layouts, images, out):
-    """The Mac's patch path with build_ipa.py's environment: <out>/<module>.x0.bin and .x1.bin from the export program,
+    """The Mac's patch path with the variables build_ipa.py sets for its export and no other TOTK_* variable: <out>/<module>.x0.bin and .x1.bin from the export program,
     <module>.w.bin from the image (gen_embed.py: from the end of the text's page to the patch area). Returns the patched
     word counts the program prints, {module: {'text': n, 'patch_area': n}}."""
     env = EXPORT_ENV | {'TOTK_EXPORT_IOS': str(out)}

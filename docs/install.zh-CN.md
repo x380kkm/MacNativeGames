@@ -222,7 +222,7 @@ python games/totk/ios/tools/recover_ipa.py <旧的 TOTK.ipa> --out <工作目录
 python games/totk/ios/tools/export_ios_windows.py --tree <工作目录>/totk
 ```
 
-它把九个代码节写进 `<工作目录>/totk/build/export-ios`，第 5 步从这里取。在 Mac 上，`build_ipa.py` 让装载器的 `export-ios` 做这件事。这个工具用 Visual Studio 的 clang 编译补丁代码本身，即 `games/totk/runtime/game_patches_v143.c`（`--clang <clang.exe>` 可以指定别的 clang）。它先把还原出的模块和 `expected-v1.4.3.json` 核对，再按 `build_ipa.py` 的环境对它们打补丁：`TOTK_RENDER_RES=1280x720`，不带任何其他 `TOTK_*` 变量，不管 shell 里设了什么。然后它对代码节运行同一个文件里设备启动时的核对，少了任何一项补丁就报错停下。代码节旁边还写出 `layout.json`，即它们的大小和 SHA-256。`games/totk/ios/ci/embed-layout-v143.json` 必须和它是同一个文件；两者不同时工具会提示，因为按别的布局构建的运行时不接受这些代码节。`--check <文件夹>` 只对文件夹里的代码节运行设备的核对，并列出它们缺的补丁。在实际运行的电脑上（2026-10-30），导出只用了几秒。导出的 main 代码和旧 App 的相差 32 个字：渲染分辨率补丁的 4 条指令、渐隐修正的 8 个跳转和空指令字，以及它新增的 20 个字的代码。另外八个代码节和旧 App 的逐字节相同。
+它把九个代码节写进 `<工作目录>/totk/build/export-ios`，第 5 步从这里取。在 Mac 上，`build_ipa.py` 让装载器的 `export-ios` 做这件事。这个工具用 `vswhere` 找到的 Visual Studio 的 clang 编译补丁代码本身，即 `games/totk/runtime/game_patches_v143.c`（`--clang <clang.exe>` 可以指定别的 clang；两者都没有时用 `PATH` 里的 `clang`）。它先把还原出的模块和 `expected-v1.4.3.json` 核对，再只带 `build_ipa.py` 为导出设置的两个变量 `TOTK_EXPORT_IOS` 和 `TOTK_RENDER_RES=1280x720` 对它们打补丁。`build_ipa.py` 会把 shell 的环境传下去，这个工具则去掉其他所有 `TOTK_*` 变量，所以得到的代码节等于 Mac 在没有 `TOTK_*` 变量的 shell 里构建出的代码节。然后它对代码节运行同一个文件里设备启动时的核对，少了任何一项补丁就报错停下。代码节旁边还写出 `layout.json`，即它们的大小和 SHA-256。`games/totk/ios/ci/embed-layout-v143.json` 必须和它是同一个文件；两者不同时工具会提示，因为按别的布局构建的运行时不接受这些代码节。`--check <文件夹>` 只对文件夹里的代码节运行设备的核对，并列出它们缺的补丁。在实际运行的电脑上（2026-10-30），导出只用了几秒。导出的 main 代码和旧 App 的相差 32 个字：渲染分辨率补丁的 4 条指令、渐隐修正的 8 个跳转和空指令字，以及它新增的 20 个字的代码。另外八个代码节和旧 App 的逐字节相同。
 
 **3. 做着色器种子：**
 
