@@ -370,6 +370,17 @@ FONT, TABLE, LAYOUT = ('Font/Font.Nin_NX_NVN.bfarc.zs', 'System/Resource/Resourc
                        'UI/LayoutArchive/Common.Product.140.Nin_NX_NVN.blarc.zs')
 
 
+class NoContainerYet(app_container.LocalContainer):
+    """Reads nothing before the app is installed, as DeviceContainer.documents raises then."""
+    def read(self, rel):
+        app_container.require(self.installed(), f'{self.bundle_id} is not installed on the device')
+        return super().read(rel)
+
+    def listdir(self, rel):
+        app_container.require(self.installed(), f'{self.bundle_id} is not installed on the device')
+        return super().listdir(rel)
+
+
 class Deploy(unittest.TestCase):
     """deploy with --simulate: what stops it while the device is as it was, so it never ends with an app that cannot start."""
     def setUp(self):
@@ -545,6 +556,16 @@ class Deploy(unittest.TestCase):
         self.old_app(); self.image_on_device(); self.seed_on_device(); self.seed_folder()
         self.finishes()
         self.assertEqual((self.data/'shader-seed.txt').read_text().split('\n')[1], 'f' * 64)
+
+    def test_a_first_install_asks_the_device_nothing_before_the_app_is_there(self):
+        box = NoContainerYet(self.container, 'a.b')
+        info = app_container.ipa_info(self.ipa_file)
+        a = SimpleNamespace(mod=None, slot=None, romfs=None, seed=None, no_backup=True, backup_to=None, version=push.MOD_VERSION)
+        with self.assertRaisesRegex(push.PushError, 'no game data'):
+            push.deploy_app(box, a, self.ipa_file, info)
+        a.romfs = self.image()
+        with self.assertRaisesRegex(push.PushError, 'no shaders'):
+            push.deploy_app(box, a, self.ipa_file, info)
 
     def test_the_seed_command_says_what_it_takes(self):
         self.old_app()
