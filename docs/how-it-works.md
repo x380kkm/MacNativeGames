@@ -224,10 +224,11 @@ Zeros elsewhere are trusted, so a false zero there is not caught: the same run h
 
 `TOTK_OCCL_GUARD=0` turns this off; on iPhone and iPad, Settings › Apps › Tears of the Kingdom › Graphics troubleshooting ›
 Occlusion guard › Off sets it. `TOTK_OCCL_GUARD=1` turns it on on the Mac, where it is off by default. A draw held back while
-its shader is prepared raises its report on every platform, whatever the switch says. The `[occl]` line in the log counts
-both kinds of raised report ("raised to 1", "guard raised") and the frames with at least 5 queries whose reports are all
-still 0 after the first kind of raise ("with all of them 0"). The frame rule has neither limit, so "guard raised" can grow
-while that count stays at 0.
+its shader or pipeline is prepared raises its report on every platform, whatever the switch says. The `[occl]` line in the
+log counts both kinds of raised report ("raised to 1", "guard raised") and the frames with at least 5 queries whose reports
+are all still 0 after the first kind of raise ("with all of them 0"). The second kind of raise has neither condition: it also
+applies to a frame with fewer than 5 queries, and it looks at the counts before the first kind of raise. So "guard raised"
+can grow while the count of frames "with all of them 0" stays at 0.
 
 The guard has not run on a device, so its effect in the game is untested. `tests/test_occlusion_guard.py` runs the report
 rules on crafted submissions, and checks in the source that the draw path marks the draws that miss their counter and that
