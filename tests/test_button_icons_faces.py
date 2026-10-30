@@ -15,6 +15,14 @@ READY = all(importlib.util.find_spec(m) is not None for m in ('compression.zstd'
 SLOTS = (0xE040, 0xE041, 0xE042, 0xE043)   # the Switch A, B, X and Y icons
 
 
+class ContinuousIntegration(unittest.TestCase):
+    def test_the_test_job_has_fonttools(self):
+        """Without it these tests and test_button_icons_hud.py skip on the runner, and a change that breaks them stays green.
+        The job installs it apart from games/totk/requirements.txt, which is what build_app.py needs."""
+        workflow = (ROOT/'.github/workflows/tests.yml').read_text(encoding='utf-8')
+        self.assertRegex(workflow, r'pip install -r games/totk/requirements\.txt fonttools==\d+\.\d+\.\d+\n')
+
+
 class Letters:
     """Stands in for make_button_icons.Glyphs: hole() records the text instead of drawing it."""
     def __init__(self):
