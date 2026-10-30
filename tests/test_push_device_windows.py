@@ -219,15 +219,28 @@ class Mods(unittest.TestCase):
         push.push_mod(self.box, old, log=quiet)
         new_files = {FONT: b'new font', LAYOUT: b'new layout', TABLE: b'table'}   # FONT and LAYOUT keep their sizes
         new = self.mod(new_files, 'new')
+        self.box.ops.clear()
         self.box.stop = len(self.box.uploads) + 1   # the cable comes out after the first file
         with self.assertRaises(OSError):
             push.push_mod(self.box, new, log=quiet)
         self.assertFalse((self.on_device/'manifest.tsv').exists())   # the app loads no half-copied mod
+        self.assertEqual(next(op for op in self.box.ops if op[0] == 'remove'), ('remove', f'{push.MODS}/v143/manifest.tsv'))
         self.assertEqual((self.on_device/push.COPYING).read_bytes(), (new/'manifest.tsv').read_bytes())
         self.box.stop = None; self.box.uploads.clear()
         self.assertEqual(push.push_mod(self.box, new, log=quiet), 'copied')
         self.assertEqual(len(self.box.uploads), 2)   # the file copied before the stop is kept
         self.assertEqual(self.device_files(), {**new_files, 'manifest.tsv': (new/'manifest.tsv').read_bytes()})
+
+    def test_a_stopped_copy_is_not_taken_up_by_another_mod(self):
+        stopped = self.mod({FONT: b'old icons', LAYOUT: b'old layout'}, 'stopped')
+        self.box.stop = len(self.box.uploads) + 1   # the cable comes out after the first file
+        with self.assertRaises(OSError):
+            push.push_mod(self.box, stopped, log=quiet)
+        self.box.stop = None
+        files = {FONT: b'new icons', LAYOUT: b'new layout'}   # the sizes of the stopped copy's files
+        other = self.mod(files, 'other')
+        self.assertEqual(push.push_mod(self.box, other, log=quiet), 'copied')
+        self.assertEqual(self.device_files(), {**files, 'manifest.tsv': (other/'manifest.tsv').read_bytes()})
 
     def test_another_mod_replaces_the_folder(self):
         push.push_mod(self.box, self.mod({FONT: b'a', 'Sound/Extra.bwav': b'extra'}, 'one'), log=quiet)
@@ -360,6 +373,16 @@ class Mods(unittest.TestCase):
         slots = run('push-slots', self.slots(), '--bundle-id', 'a.b')
         self.assertEqual(slots.returncode, 0, slots.stderr)
         self.assertEqual(self.on_device.with_name('v143-strong').joinpath(FONT).read_bytes(), b'strong font')
+        other_version = self.on_device.with_name('v121-max')
+        versioned = run('push-mod', mod, '--bundle-id', 'a.b', '--version', 'v121', '--slot', 'max')
+        self.assertEqual(versioned.returncode, 0, versioned.stderr)
+        self.assertTrue((other_version/'manifest.tsv').is_file())
+        removed = run('remove-mod', '--bundle-id', 'a.b', '--version', 'v121', '--slot', 'max')
+        self.assertEqual(removed.returncode, 0, removed.stderr)
+        self.assertFalse(other_version.exists())
+        deployed = run('deploy', self.ipa(), '--no-backup', '--mod', mod, '--version', 'v121', '--slot', 'max')
+        self.assertEqual(deployed.returncode, 0, deployed.stderr)
+        self.assertTrue((other_version/'manifest.tsv').is_file())
         self.assertNotEqual(run('deploy', self.ipa(), '--no-backup', '--slot', 'off').returncode, 0)   # no --mod to put there
         self.assertNotEqual(run('push-mod', mod, '--bundle-id', 'a.b', '--slot', 'other').returncode, 0)
 

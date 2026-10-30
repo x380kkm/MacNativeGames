@@ -365,7 +365,7 @@ What they do not change:
 - A higher maximum durability reaches only items obtained after the mod is in, because a save keeps each item's durability. Items picked up with a slot in use are expected to keep their durability after the slot changes, so back up the saves first (`backup-save`).
 - The number of battery cells is saved and stays. Only the drain and the recharge rate change.
 - The pause before the battery recharges is a constant in the game's code and stays.
-- Items you already own wear as before. A melee hit costs a fixed 1 in the game's code that no data file scales, so a RomFS mod cannot slow it. [mods.md](mods.md#gameplay-tuning) has the details.
+- Items you already own wear as before. A melee hit costs a fixed 1 in the game's code that no data file scales. The data only holds an on/off switch per kind of target, and no slot touches it. [mods.md](mods.md#gameplay-tuning) has the details.
 
 On the PC this was tried on (2026-10-30), `--slots` took 53 s. `v143-off` holds the 6 icon files, and the other folders 214 files, 45.8 MiB. A comparison with the RomFS found only the intended values changed, 418 fields of 4 bytes in 208 files, with the SARC member tables, the unpacked sizes and the zstd dictionaries as they were. The runtime's overlay code, compiled on Windows with Visual Studio's clang, accepted each folder on top of the build's overlay. `push-slots` has been rehearsed with `--simulate` only, and the change to `main.m` has only been syntax-checked. None of this has run on a device yet, so no effect has been seen in the game.
 

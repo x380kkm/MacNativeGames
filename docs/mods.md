@@ -336,7 +336,9 @@ No option changes the wear per hit, so items you already own wear as before. `Da
 `Life/DamageParameters/EquipmentCommon` and `ShieldCommon` looks like the place, but 1.4.3's code reads that rate only for
 an incoming attack of the type `Durability`, and none was found. A melee hit costs a literal 1, and rods, throws and AI
 requests add whole steps of 1 that no rate scales; a bow very likely does the same, though its trigger was not isolated. A
-blocked hit costs at least 1 through a separate rate. So `--durability K` does not compound with anything: a new weapon
+blocked hit costs at least 1 through a separate rate. Whether a hit wears the weapon at all is decided per kind of target
+by `IsCauseDurabilityDamageOnTgHit` in `Component/SensorHitParam`. That is an on/off switch, not a rate, and no option
+changes it. So `--durability K` does not compound with anything: a new weapon
 takes K times as many hits, and a new shield lasts K times as long at the same wear per block. This comes from reading
 the code, not from a run on a device.
 
@@ -742,7 +744,8 @@ iPhone 或 iPad 在“设置”App 里从中选择，见 [install.zh-CN.md](inst
 没有改变每次攻击耐久损耗的选项，所以已有的物品按原来的速度磨损。`Life/DamageParameters/EquipmentCommon` 和 `ShieldCommon`
 里的 `DamageRates.Durability` 看起来像是对应的数值，但 1.4.3 的代码只在受到类型为 `Durability` 的攻击时才读它，而没有找到这样的
 攻击。近战命中固定扣 1，杖、投掷和 AI 请求每次加 1，都不经过任何倍率；弓很可能也一样，不过它的触发点没有单独确认。格挡
-通过另一个倍率扣耐久，每次至少扣 1。所以 `--durability K` 不会和别的数值叠加：新武器能多用 K 倍的次数，新盾在每次格挡损耗
+通过另一个倍率扣耐久，每次至少扣 1。一次命中是否磨损武器，由 `Component/SensorHitParam` 里的
+`IsCauseDurabilityDamageOnTgHit` 按目标种类决定。它是开关，不是倍率，没有选项改动它。所以 `--durability K` 不会和别的数值叠加：新武器能多用 K 倍的次数，新盾在每次格挡损耗
 相同的情况下多用 K 倍。这些结论来自阅读代码，没有在设备上运行过。
 
 这些数值都还没有在 1.4.3 的游戏里实际看到效果。
