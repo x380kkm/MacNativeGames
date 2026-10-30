@@ -443,7 +443,7 @@ class Slots(Fixture):
                 for result in (self.run_tool('--slots', self.root/'mods', '--base', base, romfs=romfs),
                                self.run_tool('--into', self.mod, '--durability', 2, romfs=romfs)):
                     self.assert_one_line(result, f'manifest not written: {COMMON}: the mod\'s file is not a readable archive')
-                self.assertFalse((self.root/'mods/v143-off').exists())
+                self.assertEqual(sorted(p.name for p in (self.root/'mods').iterdir()), [])   # no staging folder either
 
     def test_a_folder_this_tool_did_not_make_stops_the_run(self):
         mods = self.root/'mods'; (mods/'v143-strong').mkdir(parents=True)
@@ -453,6 +453,52 @@ class Slots(Fixture):
         self.assertIn('v143-strong', result.stderr)
         self.assertEqual(sorted(p.name for p in mods.iterdir()), ['v143-strong'])
         self.assertEqual((mods/'v143-strong/mine.bin').read_bytes(), b'the player\'s')
+
+    def test_a_folder_written_with_into_stops_the_run(self):
+        """--into leaves its record in a folder it did not make, with files of the player's beside it."""
+        mods = self.root/'mods'; (mods/'v143-strong/Sound').mkdir(parents=True)
+        (mods/'v143-strong/Sound/Mine.bwav').write_bytes(b'the player\'s')
+        self.assertEqual(self.run_tool('--into', mods/'v143-strong', '--durability', 2).returncode, 0)
+        self.assert_one_line(self.run_tool('--slots', mods, '--base', self.base()), 'v143-strong', 'not made by this tool')
+        self.assertEqual(sorted(p.name for p in mods.iterdir()), ['v143-strong'])
+        self.assertEqual((mods/'v143-strong/Sound/Mine.bwav').read_bytes(), b'the player\'s')
+
+    def test_a_record_that_does_not_name_the_slot_stops_the_run(self):
+        mods = self.build()
+        for record in ('{"slot": "max"}', '{"slot": null}', '[]', 'not a record'):
+            with self.subTest(record=record):
+                (mods/'v143-strong/.gameplay-tuning.json').write_text(record, encoding='utf-8')
+                self.assert_one_line(self.run_tool('--slots', mods, '--base', self.root/'icons'), 'v143-strong', 'not made by this tool')
+                self.assertTrue((mods/'v143-strong/Font/Font.bfarc.zs').is_file())
+
+    def test_a_slots_folder_in_the_base_is_refused(self):
+        """It would copy the base into itself, or list the earlier slots as files of the later ones."""
+        base = self.base()
+        for slots in (base, base/'slots', base/'deep/slots'):
+            with self.subTest(slots=slots):
+                result = self.run_tool('--slots', slots, '--base', base)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn('error: --slots', result.stderr)
+        self.assertEqual(sorted(p.name for p in base.iterdir()), ['Font', 'manifest.tsv'])
+
+    def test_a_base_a_run_would_replace_is_refused(self):
+        mods = self.build()
+        kept = (mods/'v143-strong/Font/Font.bfarc.zs').read_bytes()
+        inner = mods/'v143-strong/kept'; inner.mkdir()
+        (inner/'manifest.tsv').write_text('# path\tsize\tsha256\toriginal_sha256\n', encoding='utf-8', newline='\n')
+        for base in (mods/'v143-strong', inner):
+            with self.subTest(base=base):
+                result = self.run_tool('--slots', mods, '--base', base)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn('error: --slots', result.stderr)
+        self.assertEqual((mods/'v143-strong/Font/Font.bfarc.zs').read_bytes(), kept)
+        self.assertTrue((inner/'manifest.tsv').is_file())
+
+    def test_a_base_beside_the_slot_folders_is_a_base(self):
+        mods = self.root/'mods'; mods.mkdir()
+        base = self.base().rename(mods/'v143-xbox')
+        self.assertEqual(self.run_tool('--slots', mods, '--base', base).returncode, 0)
+        self.assertEqual(self.life(SWORD, folder=mods/'v143-strong'), 100)
 
     def test_a_base_holding_another_mods_pack_stops_the_run(self):
         base = self.base()

@@ -28,8 +28,10 @@ with make_mod_manifest.py's manifest over the whole folder, so the folder may ho
 
 --slots builds the four folders <version>-off, -moderate, -strong and -max that the Settings pane's mod slot row chooses
 between (ios/Settings.bundle TOTK_MOD_SLOT, ios/Sources/main.m, values in SLOTS): each one is a copy of --base with that
-slot's values, with its own manifest. A slot folder is built beside its old one and then takes its place; a folder of that
-name this tool did not make stops the run.
+slot's values, with its own manifest. A slot folder is built beside its old one and then takes its place, and a run that
+fails leaves no part of it behind. A folder of that name whose record does not name that slot stops the run, as one that
+--into wrote in does: it may hold other files. The folder of the slots may not be --base or lie inside it, and --base may
+not be a slot folder or lie inside one.
 
 .gameplay-tuning.json in the mod folder records the values; its leading dot keeps it out of the manifest and off the device.
 The output holds files made from the game's own: keep it out of the repository.
@@ -287,12 +289,35 @@ def make_mod(mod, original, tuning, replace=False, slot=None, base=None):
     print(f'{mod/"manifest.tsv"}: {len(found.lines)} files ({len(found.lines) - len(found.added)} replaced, {len(found.added)} added)')
 
 
+def slot_folders(folder, version):
+    """The folder of each slot below `folder`, as {slot: path}."""
+    return {slot: folder/f'{version}-{slot}' for slot in SLOTS}
+
+
+def overlapping(folder, base, version):
+    """Whether a --slots run into `folder` would write where the mod folder `base` lies: a folder that is the base or lies
+    inside it would have the base copied into itself, and a base that is a slot folder or lies inside one would be replaced."""
+    folder, base = folder.resolve(), base.resolve()
+    return base == folder or base in folder.parents or any(
+        path == base or path in base.parents for path in slot_folders(folder, version).values())
+
+
+def made_for_slot(path, slot):
+    """Whether the folder `path` is the one --slots built for `slot`. A record alone does not say so: --into leaves one, with
+    no slot, in any folder it writes into, and such a folder may hold what the player put there."""
+    try:
+        return json.loads((path/RECORD).read_text(encoding='utf-8'))['slot'] == slot
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
 def build_slots(folder, base, version, original):
     """The folder <version>-<slot> below `folder` for every slot: a copy of the mod folder `base` with the slot's values."""
-    slots = {slot: folder/f'{version}-{slot}' for slot in SLOTS}
-    foreign = [str(path) for path in slots.values() if path.exists() and not (path/RECORD).is_file()]
+    slots = slot_folders(folder, version)
+    foreign = [str(path) for slot, path in slots.items() if path.exists() and not made_for_slot(path, slot)]
     if foreign:
-        raise TuningError(f'{", ".join(foreign)}: not made by this tool (no {RECORD}): move it away, nothing written')
+        raise TuningError(f'{", ".join(foreign)}: not made by this tool for that slot ({RECORD} does not name it): move it '
+                          'away, nothing written')
     for tuning in SLOTS.values():
         refused = plan(base, original, tuning, False)[1]
         if refused:
@@ -301,12 +326,16 @@ def build_slots(folder, base, version, original):
         target, staging, previous = slots[slot], folder/f'.{slots[slot].name}.new', folder/f'.{slots[slot].name}.old'
         print(f'--- slot {slot}')
         shutil.rmtree(staging, ignore_errors=True)
-        shutil.copytree(base, staging)
-        make_mod(staging, original, tuning, slot=slot, base=base)
-        if target.exists():
-            shutil.rmtree(previous, ignore_errors=True)
-            target.rename(previous)
-        staging.rename(target)
+        try:
+            shutil.copytree(base, staging)
+            make_mod(staging, original, tuning, slot=slot, base=base)
+            if target.exists():
+                shutil.rmtree(previous, ignore_errors=True)
+                target.rename(previous)
+            staging.rename(target)
+        except BaseException:   # a copy of the base, with tuned game files in a later slot: not one more folder to find
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
         shutil.rmtree(previous, ignore_errors=True)
         print(f'{target}: ready')
 
@@ -339,6 +368,9 @@ def main():
                      'and --replace go with --into')
     if args.slots and not (args.base and (args.base/'manifest.tsv').is_file()):
         parser.error('--slots needs --base, a mod folder with its manifest.tsv')
+    if args.slots and overlapping(args.slots, args.base, args.version):
+        parser.error('--slots may not be --base or lie inside it, and --base may not be a slot folder or lie inside one: the '
+                     'run would copy the base into itself or replace it')
     if args.into and args.base:
         parser.error('--base goes with --slots')
     if args.into and all(v is None for v in values):
