@@ -163,8 +163,9 @@ request not mapped with its offsets and size (the first 8).
 iPad, Settings › Apps › Tears of the Kingdom › Graphics troubleshooting › Unaligned memory pool › Off sets it.
 `TOTK_VPOOL_UNALIGNED=1` turns the new behaviour on on the Mac, where the default stays as it was.
 
-None of this has run on a device, so its effect in the game is untested. `make -C games/totk probe-vpool` covers the path
-with the switch on, but it needs a Mac and has not been run on this change.
+None of this has run on a device, so its effect in the game is untested. `TOTK_VPOOL_UNALIGNED=1 make -C games/totk probe-vpool`
+covers the path with the switch on; without the variable the probe checks the refusal. It needs a Mac and the `rewritten/v0`
+folder of a 1.0.0 build, and has not been run on this change.
 
 ## One image at two colour slots
 
