@@ -496,15 +496,29 @@ static void apply_settings(void) {
     setenv("TOTK_ROMFS_PATCHES",[res stringByAppendingPathComponent:@"romfs-patches"].fileSystemRepresentation,1);
     setenv("TOTK_ROMFS_PATCHES_OUT",[res stringByAppendingPathComponent:@"romfs-patches-out"].fileSystemRepresentation,1);
     /* Player mods (runtime/romfs.c), in the folder the Mac launcher uses below its data folder (app/launcher.m):
-       Documents/mods/<version> (TOTK_GAME_DIR, v143 for 1.4.3), when it holds a manifest.tsv (scripts/make_mod_manifest.py
-       and make_button_icons.py write one; ios/tools/push_device_windows.py push-mod copies a mod folder there).
-       overwrite=0 keeps a devicectl TOTK_ROMFS_MODS winning ("0" loads none). */
-    NSString *mods = [docs stringByAppendingPathComponent:@"mods/" TOTK_GAME_DIR];
-    if ([fm fileExistsAtPath:[mods stringByAppendingPathComponent:@"manifest.tsv"]]) setenv("TOTK_ROMFS_MODS",mods.fileSystemRepresentation,0);
+       Documents/mods/<version>-<slot> when the Settings pane's mod slot (TOTK_MOD_SLOT, handed over by apply_settings)
+       has a manifest.tsv there (scripts/make_gameplay_tuning.py --slots makes these folders, one per slot), else
+       Documents/mods/<version> (TOTK_GAME_DIR, v143 for 1.4.3) when it holds one (scripts/make_mod_manifest.py and
+       make_button_icons.py write one; ios/tools/push_device_windows.py push-mod copies a mod folder there). A slot is
+       lower-case letters, so it stays a folder name below mods. overwrite=0 keeps a devicectl TOTK_ROMFS_MODS winning
+       ("0" loads none). */
+    NSString *mods = [docs stringByAppendingPathComponent:@"mods/" TOTK_GAME_DIR], *chosen = nil, *why;
+    const char *slot = getenv("TOTK_MOD_SLOT"), *launchMods = getenv("TOTK_ROMFS_MODS");
+    size_t slotLength = slot ? strlen(slot) : 0;
+    NSString *slotMods = slotLength && slotLength < 16 && strspn(slot,"abcdefghijklmnopqrstuvwxyz") == slotLength
+        ? [mods stringByAppendingFormat:@"-%s",slot] : nil;
+    if (slotMods && [fm fileExistsAtPath:[slotMods stringByAppendingPathComponent:@"manifest.tsv"]]) {
+        chosen = slotMods; why = [NSString stringWithFormat:@"mod slot %s",slot];
+    } else {
+        why = slotMods ? [NSString stringWithFormat:@"no %@/manifest.tsv for mod slot %s",slotMods,slot] : @"no mod slot";
+        if ([fm fileExistsAtPath:[mods stringByAppendingPathComponent:@"manifest.tsv"]]) chosen = mods;
+        else why = [why stringByAppendingFormat:@", no %@/manifest.tsv",mods];
+    }
+    if (chosen) setenv("TOTK_ROMFS_MODS",chosen.fileSystemRepresentation,0);
+    if (launchMods) why = @"TOTK_ROMFS_MODS from the launch";
     const char *modsUsed = getenv("TOTK_ROMFS_MODS");
-    if (modsUsed && *modsUsed && strcmp(modsUsed,"0")) fprintf(stderr,"[totk] player mods: %s\n",modsUsed);
-    else if (modsUsed) fprintf(stderr,"[totk] player mods: none (TOTK_ROMFS_MODS=%s)\n",modsUsed);
-    else fprintf(stderr,"[totk] player mods: none (no %s/manifest.tsv)\n",mods.fileSystemRepresentation);
+    if (modsUsed && *modsUsed && strcmp(modsUsed,"0")) fprintf(stderr,"[totk] player mods: %s (%s)\n",modsUsed,why.UTF8String);
+    else fprintf(stderr,"[totk] player mods: none (%s)\n",why.UTF8String);
     setenv("TOTK_SHARED_FONTS",[res stringByAppendingPathComponent:@"shared-fonts"].fileSystemRepresentation,1);
     NSString *aoc = [res stringByAppendingPathComponent:@"aoc"];   // Breath of the Wild's add-on content packs (build_ipa.py; runtime/aoc_romfs.c)
     if ([fm fileExistsAtPath:aoc]) setenv("TOTK_AOC",aoc.fileSystemRepresentation,1);

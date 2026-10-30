@@ -129,6 +129,19 @@ class IOSSettings(unittest.TestCase):
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
         self.assertEqual(run.stdout.strip(), row['DefaultValue'])
 
+    def test_mod_slot_row(self):
+        # main.m takes the value as the last part of a folder name, Documents/mods/<version>-<value>, and only lower-case
+        # letters; the row leaves the Breath of the Wild pane, which has no such folders. A string row is what reaches
+        # the runtime: a slider or a switch would hand over "1" or "0".
+        row = self._rows()['TOTK_MOD_SLOT']
+        self.assertEqual(row['Type'], 'PSMultiValueSpecifier')
+        self.assertEqual(row['TOTKApp'], 'totk')
+        self.assertEqual(row['Values'], ['off', 'moderate', 'strong', 'max'])
+        self.assertEqual(row['DefaultValue'], 'strong')
+        self.assertEqual(len(row['Values']), len(row['Titles']))
+        for value in row['Values']:
+            self.assertRegex(value, r'^[a-z]{1,15}$')
+
     def test_no_interpolation_switch(self):
         # MetalFX interpolation costs more GPU than the frames it replaces on this device and a downscaled output is
         # not accepted by the interpolator, so the pane must not offer a switch that can only hurt.

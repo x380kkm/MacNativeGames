@@ -450,6 +450,40 @@
 			<key>Type</key>
 			<string>PSGroupSpecifier</string>
 			<key>Title</key>
+			<string>模组 · Mods</string>
+			<key>FooterText</key>
+			<string>在电脑上生成四个文件夹（make_gameplay_tuning.py --slots）并复制到设备（push_device_windows.py push-slots）后，这里选用 Documents/mods/v143-&lt;档位&gt;。没有这个文件夹时用 Documents/mods/v143，也没有就不加载模组。耐久只影响模组生效后新拿到的武器、盾和弓；电池格数和回充前的等待不变。重新启动游戏后生效 · picks Documents/mods/v143-&lt;slot&gt;, once the four folders are made on the PC (make_gameplay_tuning.py --slots) and copied to the device (push_device_windows.py push-slots). Without that folder the game uses Documents/mods/v143, or no mod. Durability applies to weapons, shields and bows obtained after the mod is in; the battery's cells and the pause before it recharges stay as they are. Takes effect after relaunching the game</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSMultiValueSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_MOD_SLOT</string>
+			<key>TOTKApp</key>
+			<string>totk</string>
+			<key>Title</key>
+			<string>耐久与电池 · Durability and battery</string>
+			<key>DefaultValue</key>
+			<string>strong</string>
+			<key>Values</key>
+			<array>
+				<string>off</string>
+				<string>moderate</string>
+				<string>strong</string>
+				<string>max</string>
+			</array>
+			<key>Titles</key>
+			<array>
+				<string>关：只有按键图标 · Off: button icons only</string>
+				<string>中：耐久 ×3，耗电 ÷2，回充 ×2 · Moderate: durability ×3, drain ÷2, recharge ×2</string>
+				<string>强（默认）：耐久 ×5，耗电 ÷3，回充 ×3 · Strong (default): durability ×5, drain ÷3, recharge ×3</string>
+				<string>最大：耐久 ×10，耗电 ÷5，回充 ×5 · Max: durability ×10, drain ÷5, recharge ×5</string>
+			</array>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+			<key>Title</key>
 			<string>除錯 · Debug</string>
 			<key>FooterText</key>
 			<string>開啟後把日誌寫進 App 的 Documents/log.txt（在 Mac 上讀取），會稍微影響效能；關閉時不記錄任何日誌。重新啟動遊戲後生效 · writes Documents/log.txt for reading on a Mac (slightly slower); off records nothing. Takes effect after relaunching the game</string>

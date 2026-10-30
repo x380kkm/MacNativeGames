@@ -261,6 +261,59 @@ class Mods(unittest.TestCase):
         self.assertFalse(self.on_device.exists())
         self.assertEqual(push.remove_mod(self.box, log=quiet), 'none')
 
+    def test_a_slot_has_its_own_folder(self):
+        plain = self.mod({FONT: b'plain'}, 'plain')
+        strong = self.mod({FONT: b'strong font'}, 'strong')
+        self.assertEqual(push.mod_target('v143'), 'v143')
+        self.assertEqual(push.mod_target('v143', 'strong'), 'v143-strong')
+        push.push_mod(self.box, plain, log=quiet)
+        push.push_mod(self.box, strong, push.mod_target('v143', 'strong'), log=quiet)
+        slot = self.on_device.with_name('v143-strong')
+        self.assertEqual((slot/FONT).read_bytes(), b'strong font')
+        self.assertEqual((self.on_device/FONT).read_bytes(), b'plain')
+        self.assertEqual(push.remove_mod(self.box, push.mod_target('v143', 'strong'), log=quiet), 'removed')
+        self.assertFalse(slot.exists())
+        self.assertTrue((self.on_device/'manifest.tsv').is_file())
+
+    def slots(self):
+        """A folder holding the four slot folders, as make_gameplay_tuning.py --slots leaves them."""
+        for slot in push.MOD_SLOTS:
+            self.mod({FONT: f'{slot} font'.encode(), LAYOUT: f'{slot} layout'.encode()}, f'mods/v143-{slot}')
+        return self.root/'mods'
+
+    def test_push_slots_copies_every_slot(self):
+        folder = self.slots()
+        self.assertEqual(push.push_slots(self.box, folder, log=quiet), {slot: 'copied' for slot in push.MOD_SLOTS})
+        for slot in push.MOD_SLOTS:
+            on_device = self.on_device.with_name(f'v143-{slot}')
+            self.assertEqual((on_device/FONT).read_bytes(), f'{slot} font'.encode())
+            self.assertEqual((on_device/'manifest.tsv').read_bytes(), (folder/f'v143-{slot}/manifest.tsv').read_bytes())
+        self.assertEqual(push.push_slots(self.box, folder, log=quiet), {slot: 'present' for slot in push.MOD_SLOTS})
+
+    def test_push_slots_checks_every_folder_before_it_copies(self):
+        folder = self.slots()
+        (folder/'v143-max'/FONT).write_bytes(b'changed since the manifest')
+        with self.assertRaises(push.PushError):
+            push.push_slots(self.box, folder, log=quiet)
+        self.assertEqual(self.box.uploads, [])
+        (folder/'v143-max/manifest.tsv').unlink()
+        with self.assertRaises(push.PushError):
+            push.push_slots(self.box, folder, log=quiet)
+        self.assertEqual(self.box.uploads, [])
+
+    def test_push_slots_goes_on_where_it_stopped(self):
+        folder = self.slots()
+        self.box.stop = 3   # the two files of the first slot, then one of the second
+        with self.assertRaises(OSError):
+            push.push_slots(self.box, folder, log=quiet)
+        second = self.on_device.with_name(f'v143-{push.MOD_SLOTS[1]}')
+        self.assertFalse((second/'manifest.tsv').exists())   # the app loads no half-copied slot
+        self.box.stop = None; self.box.uploads.clear()
+        done = push.push_slots(self.box, folder, log=quiet)
+        self.assertEqual(done, {push.MOD_SLOTS[0]: 'present', **{slot: 'copied' for slot in push.MOD_SLOTS[1:]}})
+        self.assertEqual(len(self.box.uploads), 1 + 2 * 2)   # what the second slot still lacked, then the last two whole
+        self.assertTrue((second/'manifest.tsv').is_file())
+
     def test_the_commands_with_simulate(self):
         import subprocess
         mod = self.mod({FONT: b'font'})
@@ -277,6 +330,20 @@ class Mods(unittest.TestCase):
         pushed = run('push-mod', mod, '--bundle-id', 'a.b', '--version', 'v121')
         self.assertEqual(pushed.returncode, 0, pushed.stderr)
         self.assertTrue((self.root/'device'/push.MODS/'v121/manifest.tsv').is_file())
+        slot = run('push-mod', mod, '--bundle-id', 'a.b', '--slot', 'max')
+        self.assertEqual(slot.returncode, 0, slot.stderr)
+        self.assertTrue(self.on_device.with_name('v143-max').joinpath('manifest.tsv').is_file())
+        removed = run('remove-mod', '--bundle-id', 'a.b', '--slot', 'max')
+        self.assertEqual(removed.returncode, 0, removed.stderr)
+        self.assertFalse(self.on_device.with_name('v143-max').exists())
+        deployed = run('deploy', self.ipa(), '--no-backup', '--mod', mod, '--slot', 'off')
+        self.assertEqual(deployed.returncode, 0, deployed.stderr)
+        self.assertTrue(self.on_device.with_name('v143-off').joinpath('manifest.tsv').is_file())
+        slots = run('push-slots', self.slots(), '--bundle-id', 'a.b')
+        self.assertEqual(slots.returncode, 0, slots.stderr)
+        self.assertEqual(self.on_device.with_name('v143-strong').joinpath(FONT).read_bytes(), b'strong font')
+        self.assertNotEqual(run('deploy', self.ipa(), '--no-backup', '--slot', 'off').returncode, 0)   # no --mod to put there
+        self.assertNotEqual(run('push-mod', mod, '--bundle-id', 'a.b', '--slot', 'other').returncode, 0)
 
 
 if __name__ == '__main__':
