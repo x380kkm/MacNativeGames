@@ -31,7 +31,8 @@ static uint64_t round_up(uint64_t v, uint64_t a) { return (v + a - 1) & ~(a - 1)
    NULL and failed the whole mapping call. TOTK_VPOOL_UNALIGNED (default on iOS, =0 refuses as before,
    =1 on the Mac too): the pool stays valid over its own storage, and a request for its pages leaves the virtual pages as
    the virtual pool's own, reading zero, while the other requests of the call are mapped. Only the alias is lost: what the
-   CPU writes through this pool does not reach the virtual view, as it did not before. */
+   CPU writes through this pool does not reach the virtual view, as it did not before. That is still a defect, so the pool
+   and each such request stay red lines in the log. */
 static int unaligned_ok(void) {
     static int on = -1;
     if (on < 0) { const char *e = getenv("TOTK_VPOOL_UNALIGNED"); on = e ? atoi(e) != 0 : TARGET_OS_IPHONE && !TOTK_BOTW_BUILD; }
@@ -55,8 +56,8 @@ int totk_vpool_init(pool_t *o) {
     if (phys && !o->mem) { LOG("【红】vpool: physical pool without storage"); return 0; }
     if (phys && !(o->flags & F_CPU_NO_ACCESS)) {
         if (!aliasable(o)) {
-            if (!unaligned_ok()) { LOG("【红】vpool: CPU-visible physical pool %p not %#llx aligned; cannot alias", (void *)o->mem, host_page()); return 0; }
-            LOG("vpool: CPU-visible physical pool %p not %#llx aligned: virtual pools keep their own pages for it", (void *)o->mem, host_page());
+            LOG("【红】vpool: CPU-visible physical pool %p (flags %#x, size %#llx) not %#llx aligned; cannot alias%s", (void *)o->mem, o->flags, o->size, host_page(), unaligned_ok() ? ": virtual pools keep their own pages for it" : "");
+            if (!unaligned_ok()) return 0;
         }
         return 1;   // aliases the game storage directly
     }
@@ -104,7 +105,9 @@ static int apply_request(pool_t *v, const totk_mapping_request *r) {
     mach_vm_address_t dst = (mach_vm_address_t)(uintptr_t)(v->mem + r->virtual_offset);
     kern_return_t kr;
     const pool_t *p = (const pool_t *)(const void *)r->physical_pool;
-    if (!p || !aliasable(p)) {
+    int own_pages = !p || !aliasable(p);   // an unmap, or a source that cannot be aliased
+    if (own_pages) {
+        if (p) { static int told; if (told++ < 8) LOG("【红】vpool: request at virtual offset %#llx size %#llx not mapped to physical offset %#llx of pool %p: the pages stay the virtual pool's own", r->virtual_offset, r->size, r->physical_offset, (void *)p->mem); }
         kr = mach_vm_allocate(mach_task_self(), &dst, r->size, VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE);
     } else {
         vm_prot_t cur, max;
@@ -113,7 +116,7 @@ static int apply_request(pool_t *v, const totk_mapping_request *r) {
         if (kr == KERN_SUCCESS && (cur & (VM_PROT_READ | VM_PROT_WRITE)) != (VM_PROT_READ | VM_PROT_WRITE)) { LOG("【红】vpool: alias lost RW (prot=%d)", cur); return 0; }
         if (kr == KERN_SUCCESS) vmap_note((uintptr_t)(v->mem + r->virtual_offset), r->size, (uintptr_t)(p->mem + r->physical_offset));
     }
-    if ((!p || !aliasable(p)) && kr == KERN_SUCCESS) vmap_note((uintptr_t)(v->mem + r->virtual_offset), r->size, 0);
+    if (own_pages && kr == KERN_SUCCESS) vmap_note((uintptr_t)(v->mem + r->virtual_offset), r->size, 0);
     if (kr != KERN_SUCCESS || dst != (mach_vm_address_t)(uintptr_t)(v->mem + r->virtual_offset)) {
         LOG("【红】vpool: remap at %#llx size %#llx failed kr=%d", (unsigned long long)dst, r->size, kr);
         return 0;

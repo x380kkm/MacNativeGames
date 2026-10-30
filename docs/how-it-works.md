@@ -156,8 +156,11 @@ differs per run, and checks neither result.
 On iPhone and iPad that pool stays valid over its own storage, and a mapping request for its pages leaves the virtual pages
 as the virtual pool's own, reading zero. Other requests in the same call are mapped as usual. What the CPU writes through
 the physical pool does not reach the virtual view, so it is the alias alone that is missing. Which resource lives in this
-pool is not known. `TOTK_VPOOL_UNALIGNED=0` refuses such a pool again, which fails its initialization and the whole mapping
-call; `TOTK_VPOOL_UNALIGNED=1` turns the new behaviour on on the Mac, where the default stays as it was.
+pool is not known. The log says what is missing in red lines: one for the pool with its flags and size, and one for each
+request not mapped with its offsets and size (the first 8).
+
+`TOTK_VPOOL_UNALIGNED=0` refuses such a pool again, which fails its initialization and the whole mapping call;
+`TOTK_VPOOL_UNALIGNED=1` turns the new behaviour on on the Mac, where the default stays as it was.
 
 ## One image at two colour slots
 
