@@ -19,12 +19,15 @@ typedef struct {
     const char *phone_fps;       /* TOTK_PHONE_FPS, NULL: leave unset */
 } totk_frame_env;
 
-/* The Full HD preset (docked 1 / 0): its own drawable, scene and output upscale; the operation mode follows. */
+/* The preset picture: 720p, Full HD (TOTK_DOCKED) or HD at the device's own pixels (TOTK_NATIVE_PICTURE, which wins): its
+   own drawable, scene and output upscale; the operation mode follows. */
+enum { TOTK_PICTURE_720, TOTK_PICTURE_1080, TOTK_PICTURE_SCREEN };
 typedef struct {
     const char *operation;
-    const char *drawable;        /* NULL: leave the runtime's handheld default */
+    const char *drawable;        /* NULL: leave the runtime's handheld default; "0": the screen's own pixels */
     const char *scene;           /* TOTK_RENDER_RES, "0": the game's own size, NULL: leave the runtime's default */
     const char *output_upscale;
+    const char *scene_upscale;   /* TOTK_MFX_UPSCALE: "1" forces it on (the output upscale needs it); NULL keeps the pane's switch */
 } totk_preset_env;
 
 /* mode is one of the pane's picture values; 0 when it is not (out is untouched). */
@@ -32,8 +35,8 @@ int totk_picture_env_build(const char *mode, totk_picture_env *out);
 /* cap is "30" or "60". 0 when cap is not a pane value (out is untouched). The iOS display link is fixed at 60 Hz, so
    there is no higher entry: the uncapped path could never show more than 60 either. */
 int totk_frame_env_build(const char *cap, totk_frame_env *out);
-/* docked: the pane's Full HD switch. Always succeeds. */
-int totk_preset_env_build(int docked, totk_preset_env *out);
+/* picture: TOTK_PICTURE_*. Always succeeds. */
+int totk_preset_env_build(int picture, totk_preset_env *out);
 /* fps is the pane's preset row, "60" (up to the display's rate) or "30" (held). 0 for anything else. */
 int totk_preset_frame_env_build(const char *fps, totk_frame_env *out);
 
@@ -61,8 +64,3 @@ totk_key_layer totk_key_layer_of(const char *key);
    asks here, not the switch: the Settings app can flip it while the app runs, and the pane promises that only a relaunch
    takes it, so a run never mixes the layers. */
 extern int totk_custom_layer;
-
-/* The first row the start screen shows, of 0 the picture, 1 the frame rate, 2 Play (start_screen.m). The first two are the
-   presets, which do not apply with the custom layer on (custom 1), so only Play is left then. has_picture: the pane has
-   Full HD. */
-int totk_start_first_row(int custom, int has_picture);

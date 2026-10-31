@@ -25,6 +25,8 @@ void runtime_boot_error(const char *stage, const char *detail);
 static char *host_argv[3];
 static NSString *g_no_game_data;   // set when there is no RomFS image to play from (didFinishLaunching)
 static NSString *g_seed_pack, *g_seed_unpack_to;   // a pushed shader pack to unpack before the game starts (seed_unpack)
+static NSArray<NSString *> *g_start_rows;          // rows the start screen writes that the launch left to the pane (apply_settings)
+static void (^g_apply_mods)(void);                 // the player mods, once the start screen has left the slot (startGame)
 
 /* The startup shaders arrive as one stream cut into 1 GiB parts (<folder>.pack.000, .001, ...; ios/tools/install_device.py
    push_seed): devicectl stops after ~25,000 of the seed's 128,000 files when it copies a folder (2026-10-23). Stream:
@@ -128,11 +130,12 @@ static void apply_display_settings(void);   // below, next to the pane helpers i
         runtime_ios_sync_drawable(weak.gameView);   // the drawable follows the chosen picture (TOTK_IOS_DRAWABLE_H)
         [weak boot];
     };
-    /* The game starts at once with the Settings app's choices. The start screen, which waits for a tap, comes up only when
-       a launch asks for it: devicectl ... --environment-variables '{"TOTK_START_SCREEN":"1"}'. */
+    /* A run's settings are made here, outside the game: nothing of it runs before Play, and it draws no settings of its own.
+       A run started by a script skips the screen, which would wait for a tap: devicectl ... --environment-variables
+       '{"TOTK_START_SCREEN":"0"}'. The Settings app's choices apply as they are (after PR #1174). */
     const char *screen = getenv("TOTK_START_SCREEN");
-    if (screen && !strcmp(screen, "1")) [self.view addSubview:[[TOTKStartView alloc] initWithFrame:self.view.bounds onStart:start]];
-    else start();
+    if (screen && !strcmp(screen, "0")) start();
+    else [self.view addSubview:[[TOTKStartView alloc] initWithFrame:self.view.bounds onStart:start]];
 #endif
 }
 - (void)boot {
@@ -158,6 +161,7 @@ static void apply_display_settings(void);   // below, next to the pane helpers i
     [self startGame];
 }
 - (void)startGame {
+    g_apply_mods();
     /* Playback category (PR #97): plays with the ring / silent switch off and routes to the speaker. Without an active
        session the game's CoreAudio output stays on a null sink on iOS 27 ("no device sink in use"); activating it in
        didFinishLaunching blocked the main thread before the log file was opened. Interruptions: audio_observe. */
@@ -264,13 +268,23 @@ static void apply_preset_frame_rate(const char *fps) {
    layer had it handed over in apply_settings and the start screen does not write its rows, so it is left as it is. The
    mapping is settings_map.c's. */
 static void apply_display_settings(void) {
-    if (totk_custom_layer) return;
     NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    for (NSString *key in g_start_rows) {   // what the start screen may have changed since apply_settings handed them over
+        id value = [d objectForKey:key];
+        if ([value isKindOfClass:NSNumber.class]) setenv(key.UTF8String, [value boolValue] ? "1" : "0", 1);
+        else if ([value isKindOfClass:NSString.class]) setenv(key.UTF8String, [value UTF8String], 1);
+    }
+    /* The game's own 16:9, with bars on a screen of another shape, unless the player asked for the whole screen: with
+       TOTK_ASPECT unset aspect_install takes the screen's shape, which on an iPad's 4:3 narrows the camera and flattens the
+       HUD. overwrite=0: TOTK_ASPECT from devicectl still wins. */
+    if (![d boolForKey:@"TOTK_FILL_SCREEN"]) setenv("TOTK_ASPECT","0",0);
+    if (totk_custom_layer) return;
     totk_preset_env prenv;
-    totk_preset_env_build([d boolForKey:@"TOTK_DOCKED"], &prenv);
+    totk_preset_env_build([d boolForKey:@"TOTK_NATIVE_PICTURE"] ? TOTK_PICTURE_SCREEN : [d boolForKey:@"TOTK_DOCKED"] ? TOTK_PICTURE_1080 : TOTK_PICTURE_720, &prenv);
     if (prenv.drawable) setenv("TOTK_IOS_DRAWABLE_H", prenv.drawable, 0);
     if (prenv.scene) setenv("TOTK_RENDER_RES", prenv.scene, 0);
     setenv("TOTK_MFX_OUTPUT", prenv.output_upscale, 0);
+    if (prenv.scene_upscale) setenv("TOTK_MFX_UPSCALE", prenv.scene_upscale, 1);
     apply_operation_mode(prenv.operation);
     // Frame rate: Settings.bundle › TOTK_PHONE_FPS.
     NSString *fps = [d stringForKey:@"TOTK_PHONE_FPS"] ?: @"60";
@@ -315,6 +329,10 @@ static void apply_settings(void) {
     totk_key_layer layer_of = custom ? TOTK_KEY_CUSTOM : TOTK_KEY_PRESET;
 #if !TARGET_OS_VISION
     BOOL scene_from_launch = getenv("TOTK_RENDER_RES") != NULL;   // here, before the loop hands the stored row to that variable
+    NSMutableArray<NSString *> *start_rows = [NSMutableArray array];
+    for (NSString *key in @[@"TOTK_MOD_SLOT", @"TOTK_FPS_OVERLAY", @"TOTK_SHADER_OVERLAY"])
+        if (!getenv(key.UTF8String)) [start_rows addObject:key];   // a devicectl value stays
+    g_start_rows = start_rows;
 #endif
     for (NSString *key in defaults) {
         totk_key_layer owned = totk_key_layer_of(key.UTF8String);
@@ -422,7 +440,7 @@ static void apply_settings(void) {
 }
 
 /* Player mods (runtime/romfs.c), in the folder the Mac launcher uses below its data folder (app/launcher.m):
-   <mods>-<slot> when the Settings pane's mod slot (TOTK_MOD_SLOT, handed over by apply_settings) has a manifest.tsv
+   <mods>-<slot> when the mod slot (TOTK_MOD_SLOT, from the Settings pane or the start screen) has a manifest.tsv
    there (scripts/make_gameplay_tuning.py --slots makes these folders, one per slot), else `mods`, which is
    Documents/mods/<version> (TOTK_GAME_DIR, v143 for 1.4.3), when it holds one (scripts/make_mod_manifest.py and
    make_button_icons.py write one; ios/tools/push_device_windows.py push-mod copies a mod folder there), else
@@ -540,10 +558,7 @@ static void apply_player_mods(NSString *mods, NSString *appMods) {
     setenv("TOTK_MFX_UPSCALE","0",0);
     setenv("TOTK_FPS_OVERLAY","0",0);
 #else
-    /* The game's own 16:9 picture, with bars on a screen of another shape: filling an iPad's 4:3 narrows the camera and
-       flattens the HUD (runtime/aspect_patch.h). overwrite=0: TOTK_ASPECT from devicectl still wins. */
-    setenv("TOTK_ASPECT","0",0);
-    /* The picture and frame rate are applied when the game starts (apply_display_settings). */
+    /* The picture and frame rate are applied when the game starts (apply_display_settings), after the start screen. */
 #endif
     // Game language: the Settings app (Settings.bundle › TOTK_LANG) stores the choice in our defaults; empty means the
     // system language, which is what the runtime already follows. iOS 27 does not honour Info.plist LSEnvironment, so
@@ -552,7 +567,7 @@ static void apply_player_mods(NSString *mods, NSString *appMods) {
     if (lang.length>0&&lang.length<8) setenv("TOTK_LANG",lang.UTF8String,0);
     setenv("TOTK_ROMFS_PATCHES",[res stringByAppendingPathComponent:@"romfs-patches"].fileSystemRepresentation,1);
     setenv("TOTK_ROMFS_PATCHES_OUT",[res stringByAppendingPathComponent:@"romfs-patches-out"].fileSystemRepresentation,1);
-    apply_player_mods([docs stringByAppendingPathComponent:@"mods/" TOTK_GAME_DIR],[res stringByAppendingPathComponent:@"mods/" TOTK_GAME_DIR]);
+    g_apply_mods = ^{ apply_player_mods([docs stringByAppendingPathComponent:@"mods/" TOTK_GAME_DIR],[res stringByAppendingPathComponent:@"mods/" TOTK_GAME_DIR]); };
     setenv("TOTK_SHARED_FONTS",[res stringByAppendingPathComponent:@"shared-fonts"].fileSystemRepresentation,1);
     NSString *aoc = [res stringByAppendingPathComponent:@"aoc"];   // Breath of the Wild's add-on content packs (build_ipa.py; runtime/aoc_romfs.c)
     if ([fm fileExistsAtPath:aoc]) setenv("TOTK_AOC",aoc.fileSystemRepresentation,1);

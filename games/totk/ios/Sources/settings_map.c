@@ -37,14 +37,22 @@ int totk_frame_env_build(const char *cap, totk_frame_env *out) {
     return 1;
 }
 
-/* The Full HD preset is the game's docked settings as the Vision Pro build uses them: 1920x1080 output on a 1080-row
-   drawable with the scene at 1600x900. Off is the game's handheld picture: the runtime's drawable, and TOTK_RENDER_RES=0 so
-   the scene stays the game's own 1280x720, not the runtime's 960x540 (game_patches_v143.c render_res).
+/* 720: the game's handheld picture, the runtime's drawable and TOTK_RENDER_RES=0, so the scene stays the game's own 1280x720,
+   not the runtime's 960x540 (game_patches_v143.c render_res).
+   1080: the game's docked settings as the Vision Pro build uses them, 1920x1080 output on a 1080-row drawable with the
+   scene at 1600x900.
+   SCREEN: the same game settings on a drawable of the screen's own pixels, whatever the device, with MetalFX taking the
+   1920x1080 canvas there; the output upscale only runs while the scene upscale's master switch is on (the "mfx" picture
+   mode above says why).
    Breath of the Wild renders its docked scene through its own patch (game_patches_botw.c patch_render_1080) and its
    pane has no scene row, so the scene is left to the game there. */
-int totk_preset_env_build(int docked, totk_preset_env *out) {
-    *out = docked ? (totk_preset_env){"docked", "1080", "1600x900", "0"}
-                  : (totk_preset_env){"handheld", NULL, "0", "0"};
+int totk_preset_env_build(int picture, totk_preset_env *out) {
+    static const totk_preset_env PRESETS[] = {
+        [TOTK_PICTURE_720]    = {"handheld", NULL, "0", "0", NULL},
+        [TOTK_PICTURE_1080]   = {"docked", "1080", "1600x900", "0", NULL},
+        [TOTK_PICTURE_SCREEN] = {"docked", "0", "1600x900", "1", "1"},
+    };
+    *out = PRESETS[picture];
 #ifdef GAME_BOTW
     out->scene = NULL;
 #endif
@@ -66,6 +74,7 @@ int totk_preset_frame_env_build(const char *fps, totk_frame_env *out) {
    row can appear here: main.m's loop walks the pane's own specs, so a key without one is never handed over at all. */
 static const struct { const char *key; totk_key_layer layer; } LAYERS[] = {
     {"TOTK_DOCKED",           TOTK_KEY_PRESET},
+    {"TOTK_NATIVE_PICTURE",   TOTK_KEY_PRESET},
     {"TOTK_PHONE_FPS",        TOTK_KEY_PRESET},
     {"TOTK_IOS_PICTURE_MODE", TOTK_KEY_CUSTOM},
     {"TOTK_RENDER_RES",       TOTK_KEY_CUSTOM},
@@ -77,7 +86,6 @@ totk_key_layer totk_key_layer_of(const char *key) {
 }
 int totk_custom_layer;
 
-int totk_start_first_row(int custom, int has_picture) { return custom ? 2 : has_picture ? 0 : 1; }
 
 /* 720p with the 960x540 scene is the combination that keeps 60 fps the longest on an iPad before the SoC throttles,
    and it is the coolest (measured 2026-10-23: GPU 12.9 ms at 960x540 against 26.2 ms at 1280x720 on the same draw

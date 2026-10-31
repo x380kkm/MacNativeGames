@@ -1,9 +1,9 @@
 #import <UIKit/UIKit.h>
 
-/* Start screen (2026-10-26): the game's name and icon with its picture choices, kept in the same defaults the Settings
-   app writes (TOTK_DOCKED: Full HD docked, shown only when the game's Settings pane has it; TOTK_PHONE_FPS: "30" or "60"),
-   and a Start button. With the pane's custom layer on (TOTK_CUSTOM_PICTURE) those two do not apply, so only the button is
-   shown and they stay as they are.
+/* Start screen (2026-10-26): where a run's settings are made, outside the game: the game's name and icon, its picture,
+   shape, frame rate, durability and battery, and status lines, kept in the same defaults the Settings app writes, and a
+   Start button. It shows only rows the game's Settings pane has. With the pane's custom layer on (TOTK_CUSTOM_PICTURE) the
+   picture and the frame rate do not apply, so those two are left out and stay as they are.
    A pick is saved when it is made, and the rows show what the Settings app holds each time the app becomes active.
    Touch or a controller (up / down a row, left / right its value, A or the right face button to start). onStart runs
    once, on the main thread; the view removes itself. */

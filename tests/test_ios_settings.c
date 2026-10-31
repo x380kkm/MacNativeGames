@@ -37,12 +37,14 @@ static void frame(const char *cap, const char *hz, const char *phone) {
     }
 }
 
-static void preset(int docked, const char *operation, const char *drawable, const char *scene, const char *output) {
+static void preset(int which, const char *operation, const char *drawable, const char *scene, const char *output,
+                   const char *scene_upscale) {
     totk_preset_env e;
-    if (!totk_preset_env_build(docked, &e)) { failures++; fprintf(stderr, "preset %d: not accepted\n", docked); return; }
-    if (wants(e.drawable, drawable) || wants(e.scene, scene) || wants(e.output_upscale, output) || wants(e.operation, operation)) {
+    if (!totk_preset_env_build(which, &e)) { failures++; fprintf(stderr, "preset %d: not accepted\n", which); return; }
+    if (wants(e.drawable, drawable) || wants(e.scene, scene) || wants(e.output_upscale, output) || wants(e.operation, operation) ||
+        wants(e.scene_upscale, scene_upscale)) {
         failures++;
-        fprintf(stderr, "preset %d: %s/%s/%s/%s, want %s/%s/%s/%s\n", docked,
+        fprintf(stderr, "preset %d: %s/%s/%s/%s, want %s/%s/%s/%s\n", which,
                 e.operation ? e.operation : "(unset)", e.drawable ? e.drawable : "(unset)",
                 e.scene ? e.scene : "(unset)", e.output_upscale ? e.output_upscale : "(unset)",
                 operation ? operation : "(unset)", drawable ? drawable : "(unset)",
@@ -152,8 +154,9 @@ int main(int argc, char **argv) {
 
     /* The preset layer: Full HD is the game's docked settings with its own drawable and scene; the frame row's 60 is
        the uncapped path and its 30 holds, exactly what the runtime did before the pane had a custom layer. */
-    preset(1, "docked", "1080", "1600x900", "0");
-    preset(0, "handheld", NULL, "0", "0");
+    preset(TOTK_PICTURE_1080, "docked", "1080", "1600x900", "0", NULL);
+    preset(TOTK_PICTURE_720, "handheld", NULL, "0", "0", NULL);
+    preset(TOTK_PICTURE_SCREEN, "docked", "0", "1600x900", "1", "1");
     preset_frame("30", NULL, "30");
     preset_frame("60", NULL, NULL);
     totk_frame_env pf = {"keep", "keep"};
@@ -170,11 +173,6 @@ int main(int argc, char **argv) {
         /* A key without a pane row is never handed over, so it must not claim a layer; DRAWABLE_H is the one such key
            with a history (the picture mode replaced its row). */
         failures++; fprintf(stderr, "the key -> layer table is not what main.m and the tests expect\n");
-    }
-    /* The start screen: both preset rows, the frame rate alone without Full HD, only Play with the custom layer on. */
-    if (totk_start_first_row(0, 1) != 0 || totk_start_first_row(0, 0) != 1 || totk_start_first_row(1, 1) != 2 ||
-        totk_start_first_row(1, 0) != 2) {
-        failures++; fprintf(stderr, "the start screen shows the wrong rows\n");
     }
 
     /* Large textures, outside both layers: "save" leaves the runtime's defaults (TOTK_MIP_KEEP 1, the top level left out

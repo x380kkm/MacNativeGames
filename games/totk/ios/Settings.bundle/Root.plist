@@ -60,7 +60,7 @@
 			<key>Title</key>
 			<string>畫面 · Display</string>
 			<key>FooterText</key>
-			<string>開啟：遊戲的底座設定，輸出 1920×1080。關閉：手持 1280×720。重新啟動遊戲後生效 · on: the game's docked settings, 1920×1080 output. Off: handheld 1280×720. Takes effect after relaunching the game</string>
+			<string>重新啟動遊戲後生效 · takes effect after relaunching the game</string>
 		</dict>
 		<dict>
 			<key>Type</key>
@@ -71,6 +71,34 @@
 			<true/>
 			<key>Title</key>
 			<string>Full HD（底座模式）· Full HD (docked)</string>
+			<key>DefaultValue</key>
+			<false/>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_NATIVE_PICTURE</string>
+			<key>TOTKApp</key>
+			<string>totk</string>
+			<key>TOTKPhone</key>
+			<true/>
+			<key>Title</key>
+			<string>高清（设备屏幕）· HD (device screen)</string>
+			<key>DefaultValue</key>
+			<false/>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+			<key>Key</key>
+			<string>TOTK_FILL_SCREEN</string>
+			<key>TOTKApp</key>
+			<string>totk</string>
+			<key>TOTKPhone</key>
+			<true/>
+			<key>Title</key>
+			<string>全屏 · Full screen</string>
 			<key>DefaultValue</key>
 			<false/>
 		</dict>

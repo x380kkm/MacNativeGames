@@ -97,10 +97,10 @@ class FullHD(unittest.TestCase):
         main = (ios/'Sources/main.m').read_text()
         # The switch is the pane's preset layer (main.m's apply_settings): it hands its own drawable and scene over
         # through settings_map.c's table, which is where the docked values live.
-        self.assertIn('totk_preset_env_build([d boolForKey:@"TOTK_DOCKED"], &prenv)', main)
+        self.assertIn('[d boolForKey:@"TOTK_NATIVE_PICTURE"] ? TOTK_PICTURE_SCREEN : [d boolForKey:@"TOTK_DOCKED"] ? TOTK_PICTURE_1080 : TOTK_PICTURE_720, &prenv)', main)
         for line in ('setenv("TOTK_IOS_DRAWABLE_H", prenv.drawable, 0)', 'setenv("TOTK_RENDER_RES", prenv.scene, 0)'):
             self.assertIn(line, main)
-        preset = re.search(r'int totk_preset_env_build\(int docked.*?\n}', (ios/'Sources/settings_map.c').read_text(), re.S)
+        preset = re.search(r'int totk_preset_env_build\(int picture.*?\n}', (ios/'Sources/settings_map.c').read_text(), re.S)
         self.assertIsNotNone(preset)
         table = preset.group(0) if preset else ''
         for value in ('"docked"', '"1080"', '"1600x900"'):
@@ -166,7 +166,7 @@ class PlayerMods(unittest.TestCase):
         import push_device_windows
         game = TOOLS.parents[1]
         main = (TOOLS.parent/'Sources/main.m').read_text(encoding='utf-8')
-        self.assertIn('    apply_player_mods([docs stringByAppendingPathComponent:@"mods/" TOTK_GAME_DIR],[res stringByAppendingPathComponent:@"mods/" TOTK_GAME_DIR]);', main)
+        self.assertIn('    g_apply_mods = ^{ apply_player_mods([docs stringByAppendingPathComponent:@"mods/" TOTK_GAME_DIR],[res stringByAppendingPathComponent:@"mods/" TOTK_GAME_DIR]); };', main)
         self.assertIn('[mods stringByAppendingFormat:@"-%s",slot]', main)
         self.assertEqual(push_device_windows.mod_target('v143', 'strong'), 'v143-strong')
         slot_first = (main.index('[slotMods stringByAppendingPathComponent:@"manifest.tsv"]'),
@@ -174,8 +174,10 @@ class PlayerMods(unittest.TestCase):
         self.assertLess(*slot_first)
         self.assertIn('if (chosen) setenv("TOTK_ROMFS_MODS",chosen.fileSystemRepresentation,0);', main)   # 0: a devicectl value wins
         self.assertEqual(main.count('setenv("TOTK_ROMFS_MODS"'), 1)
-        self.assertLess(main.index('    apply_settings();'), main.index('    apply_player_mods('))   # the pane's row is handed over first
-        self.assertLess(main.index('    apply_player_mods('), main.index('host_argv[0] = strdup'))   # before the game starts
+        self.assertLess(main.index('    apply_settings();'), main.index('    g_apply_mods = ^{'))   # the pane's row is handed over first
+        start = main.index('- (void)startGame {')
+        self.assertLess(start, main.index('    g_apply_mods();'))   # the slot the start screen left
+        self.assertLess(main.index('    g_apply_mods();'), main.index('pthread_create(&thread', start))   # before the game starts
         self.assertIn('"[totk] player mods: %s (%s)\\n"', main)
         self.assertIn('@"mods/" TOTK_GAME_DIR', (game/'app/launcher.m').read_text(encoding='utf-8'))
         dirs = set(re.findall(r'#define TOTK_GAME_DIR "(\w+)"', (game/'runtime/game_version.h').read_text(encoding='utf-8')))
@@ -185,10 +187,9 @@ class PlayerMods(unittest.TestCase):
 
 
 class StartScreen(unittest.TestCase):
-    """The start screen (ios/Sources/start_screen.m), which only a launch with TOTK_START_SCREEN=1 shows: the game starts from
-    its button, the picture and frame rate are applied then (apply_display_settings in main.m), the picture row only where
-    the Settings pane has Full HD."""
-    def test_boots_at_once_with_the_settings_applied(self):
+    """The start screen (ios/Sources/start_screen.m), where a run's settings are made, outside the game: the game starts from
+    its button, the settings are applied then (apply_display_settings in main.m), a row only where the Settings pane has it."""
+    def test_boots_from_the_start_screen_with_the_settings_applied_there(self):
         import re
         ios = TOOLS.parent
         main = (ios/'Sources/main.m').read_text()
@@ -196,8 +197,8 @@ class StartScreen(unittest.TestCase):
         start = re.search(r'void \(\^start\)\(void\) = \^\{(.*?)\n    \};', main, re.S)
         self.assertTrue(start, 'the start screen before the boot')
         self.assertIn('TOTKStartView alloc] initWithFrame:self.view.bounds onStart:start]', main)
-        # the screen only when a launch asks for it; every other start goes straight to the game
-        self.assertRegex(main, r'getenv\("TOTK_START_SCREEN"\);\n    if \(screen && !strcmp\(screen, "1"\)\) \[self\.view addSubview:.*\n    else start\(\);')
+        # a script's run (TOTK_START_SCREEN=0) starts the same way without the screen (after PR #1174)
+        self.assertRegex(main, r'getenv\("TOTK_START_SCREEN"\);\n    if \(screen && !strcmp\(screen, "0"\)\) start\(\);')
         body = start.group(1)
         self.assertLess(body.index('apply_display_settings()'), body.index('runtime_ios_sync_drawable'))
         self.assertLess(body.index('runtime_ios_sync_drawable'), body.index('boot]'))
@@ -211,14 +212,20 @@ class StartScreen(unittest.TestCase):
         for key in ('forKey:@"TOTK_DOCKED"', 'forKey:@"TOTK_PHONE_FPS"'):
             self.assertIn(key, screen)
         self.assertNotIn('PLAYSHELF', screen.upper(), 'no launcher name on the game\'s screen')
+        self.assertNotIn('note.text', screen, 'rows, no explanations')
+        import plistlib
+        pane = plistlib.loads((TOOLS.parent/'Settings.bundle/Root.plist').read_bytes())['PreferenceSpecifiers']
+        slots = next(row['Values'] for row in pane if row.get('Key') == 'TOTK_MOD_SLOT')
+        self.assertIn('_slots = @[' + ', '.join(f'@"{slot}"' for slot in slots) + '];', screen)
 
-    def test_custom_settings_leave_only_the_button(self):
+    def test_custom_settings_leave_out_the_presets(self):
         """The presets do not apply with the pane's custom layer on (apply_display_settings), so the screen leaves their rows
-        out, the controller's focus stays off them and they are not saved. test_ios_settings.c checks the rule for the rows."""
+        out, the controller's focus stays off them and they are not saved."""
         screen = (TOOLS.parent/'Sources/start_screen.m').read_text(encoding='utf-8')
-        self.assertIn('_firstRow = totk_start_first_row(totk_custom_layer, [self settingsPaneHas:@"TOTK_DOCKED"]);', screen)
-        self.assertIn(': _firstRow == 1 ? @[icon, title, fpsRow, _start] : @[icon, title, _start];', screen)
-        self.assertIn('if (up) _row = MAX(_firstRow, _row - 1);', screen)
+        self.assertIn('BOOL presets = !totk_custom_layer;', screen)
+        self.assertIn('if (presets && [self settingsPaneHas:@"TOTK_DOCKED"]) add(', screen)
+        self.assertIn('if (presets) add(', screen)
+        self.assertIn('if (up) _row = MAX(0, _row - 1);', screen)
 
     def test_a_change_in_the_settings_app_stands(self):
         """iOS keeps the app alive behind the Settings app, so a row can change while the screen is up. A source check, the
@@ -239,8 +246,8 @@ class StartScreen(unittest.TestCase):
         self.assertIn('removeObserver:self', start)
         self.assertEqual(re.findall(r'\[self changed\S*\]', screen), ['[self changed:s]'], 'only a pick saves')
         changed = method('- (void)changed:(UISegmentedControl *)s {')
-        self.assertIn('if (s == _picture) [d setBool:', changed)
-        self.assertIn('else [d setObject:', changed)
+        self.assertIn('if (s == _picture) { [d setBool:', changed)
+        self.assertIn('else if (s == _fps) [d setObject:', changed)
 
 if __name__ == '__main__':
     unittest.main()

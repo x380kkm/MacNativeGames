@@ -109,19 +109,24 @@ class IOSSettings(unittest.TestCase):
                 self.assertEqual(run.returncode, 0, f'TOTK_PHONE_FPS={value}: {run.stdout}{run.stderr}')
         # The key -> layer table is the one main.m filters by; a row that moves layers without the table following it
         # would be handed over (or dropped) by the wrong layer.
-        for key, layer in {'TOTK_DOCKED': 'preset', 'TOTK_PHONE_FPS': 'preset',
+        for key, layer in {'TOTK_DOCKED': 'preset', 'TOTK_NATIVE_PICTURE': 'preset', 'TOTK_PHONE_FPS': 'preset',
                            'TOTK_IOS_PICTURE_MODE': 'custom', 'TOTK_RENDER_RES': 'custom',
                            'TOTK_FPS_CAP': 'custom', 'TOTK_FPS_OVERLAY': 'always'}.items():
             with self.subTest(key=key, layer=layer):
                 run = subprocess.run([str(executable), '--layer', key], capture_output=True, text=True)
                 self.assertEqual(run.stdout.strip(), layer, key)
 
-    def test_the_picture_stays_16_9(self):
-        # Filling an iPad's 4:3 narrows the camera and flattens the HUD, so the pane has no row for it, and what an earlier
-        # build stored for the row is never read: main.m only walks the pane's rows.
-        self.assertNotIn('TOTK_ASPECT', self._rows())
+    def test_the_picture_stays_16_9_until_asked(self):
+        # Filling an iPad's 4:3 narrows the camera and flattens the HUD, so it is a choice of its own, off by default, with a
+        # key of its own: what an earlier build stored for TOTK_ASPECT is never read, main.m only walks the pane's rows.
+        rows = self._rows()
+        self.assertNotIn('TOTK_ASPECT', rows)
+        self.assertIs(rows['TOTK_FILL_SCREEN']['DefaultValue'], False)
+        self.assertIs(rows['TOTK_NATIVE_PICTURE']['DefaultValue'], False)
         main = (ROOT / 'games/totk/ios/Sources/main.m').read_text(encoding='utf-8')
-        self.assertIn('setenv("TOTK_ASPECT","0",0);', main)
+        body = re.search(r'static void apply_display_settings\(void\) \{.*?\n}', main, re.S).group()
+        self.assertIn('if (![d boolForKey:@"TOTK_FILL_SCREEN"]) setenv("TOTK_ASPECT","0",0);', body)
+        self.assertLess(body.index('TOTK_FILL_SCREEN'), body.index('if (totk_custom_layer) return;'))   # both layers
 
     def test_scene_values_are_sizes(self):
         # build_ipa.py embeds one of these sizes in the exported patch, and main.m rejects a stored value the row does
@@ -224,7 +229,7 @@ class IOSSettings(unittest.TestCase):
         self.assertEqual(sum(len(re.findall(r'totk_custom_layer = ', text)) for text in texts.values()), 1)
         self.assertIn('if (totk_custom_layer) return;',
                       re.search(r'static void apply_display_settings\(void\) \{.*?\n}', texts['main.m'], re.S).group())
-        self.assertIn('totk_start_first_row(totk_custom_layer,', texts['start_screen.m'])
+        self.assertIn('BOOL presets = !totk_custom_layer;', texts['start_screen.m'])
 
     def test_every_row_is_applied_at_launch(self):
         # main.m registers every TOTK_* row that has a DefaultValue and hands it to the runtime as an environment

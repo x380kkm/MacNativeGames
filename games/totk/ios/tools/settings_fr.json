@@ -77,9 +77,10 @@
  "Moderate: durability ×3, drain ÷2, recharge ×2": "Modéré : durabilité ×3, consommation ÷2, recharge ×2",
  "Strong (default): durability ×5, drain ÷3, recharge ×3": "Fort (par défaut) : durabilité ×5, consommation ÷3, recharge ×3",
  "Max: durability ×10, drain ÷5, recharge ×5": "Maximum : durabilité ×10, consommation ÷5, recharge ×5",
- "on: the game's docked settings, 1920×1080 output. Off: handheld 1280×720. Takes effect after relaunching the game": "activé : réglages du mode TV du jeu, sortie 1920×1080. Désactivé : mode portable 1280×720. Prend effet au prochain lancement du jeu",
  "30 is steadier and keeps the phone cooler. Takes effect after relaunching the game": "30 est plus stable et chauffe moins. Prend effet au prochain lancement du jeu",
  "Off by default; takes effect after relaunching": "Désactivé par défaut ; prend effet au prochain lancement",
  "Durability applies to weapons, shields and bows obtained after the mod is in. Takes effect after relaunching the game": "La durabilité s'applique aux armes, boucliers et arcs obtenus après l'activation du mod. Prend effet au prochain lancement du jeu",
- "Leave these at Default. Takes effect after relaunching the game": "Laissez ces réglages sur Par défaut. Prend effet au prochain lancement du jeu"
+ "Leave these at Default. Takes effect after relaunching the game": "Laissez ces réglages sur Par défaut. Prend effet au prochain lancement du jeu",
+ "HD (device screen)": "HD (écran de l'appareil)",
+ "Full screen": "Plein écran"
 }
