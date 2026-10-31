@@ -185,9 +185,10 @@ class PlayerMods(unittest.TestCase):
 
 
 class StartScreen(unittest.TestCase):
-    """The start screen (ios/Sources/start_screen.m): the game starts from its button, the picture and frame rate are
-    applied then (apply_display_settings in main.m), the picture row only where the Settings pane has Full HD."""
-    def test_boots_from_the_start_screen_with_the_settings_applied_there(self):
+    """The start screen (ios/Sources/start_screen.m), which only a launch with TOTK_START_SCREEN=1 shows: the game starts from
+    its button, the picture and frame rate are applied then (apply_display_settings in main.m), the picture row only where
+    the Settings pane has Full HD."""
+    def test_boots_at_once_with_the_settings_applied(self):
         import re
         ios = TOOLS.parent
         main = (ios/'Sources/main.m').read_text()
@@ -195,11 +196,10 @@ class StartScreen(unittest.TestCase):
         start = re.search(r'void \(\^start\)\(void\) = \^\{(.*?)\n    \};', main, re.S)
         self.assertTrue(start, 'the start screen before the boot')
         self.assertIn('TOTKStartView alloc] initWithFrame:self.view.bounds onStart:start]', main)
-        # a script's run (TOTK_START_SCREEN=0) starts the same way without the screen (after PR #1174)
-        self.assertRegex(main, r'getenv\("TOTK_START_SCREEN"\);\n    if \(screen && !strcmp\(screen, "0"\)\) start\(\);')
+        # the screen only when a launch asks for it; every other start goes straight to the game
+        self.assertRegex(main, r'getenv\("TOTK_START_SCREEN"\);\n    if \(screen && !strcmp\(screen, "1"\)\) \[self\.view addSubview:.*\n    else start\(\);')
         body = start.group(1)
         self.assertLess(body.index('apply_display_settings()'), body.index('runtime_ios_sync_drawable'))
-        self.assertLess(body.index('apply_display_settings()'), body.index('[weak.touchPad setNeedsDisplay]'))   # the rate its button shows
         self.assertLess(body.index('runtime_ios_sync_drawable'), body.index('boot]'))
         finish = main.index('- (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:')
         self.assertNotIn('boolForKey:@"TOTK_DOCKED"', main[finish:], 'Full HD is applied when the game starts, not at launch')

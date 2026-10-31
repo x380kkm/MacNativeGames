@@ -32,9 +32,8 @@ void runtime_boot_progress(const char *stage,uint64_t done,uint64_t total){
  NSString *s=[NSString stringWithUTF8String:stage?stage:TOTK_UI("正在启动","Starting")];
  dispatch_async(dispatch_get_main_queue(), ^{
   if(!bootOverlay||bootOverlay.hidden)return;
-  bootStage.text=s;
-  if(total){bootDetail.text=[NSString stringWithFormat:@"%.1f / %.1f GB",done/1e9,total/1e9];bootProgress.hidden=NO;bootProgress.progress=(float)((double)done/(double)total);}
-  else {bootDetail.text=@(TOTK_UI("正在处理，请稍候","Working, please wait"));bootProgress.hidden=YES;}
+  bootStage.text=s;bootProgress.hidden=!total;
+  if(total)bootProgress.progress=(float)((double)done/(double)total);
  });
 }
 void runtime_boot_count(const char *stage,uint64_t done,uint64_t total){
@@ -44,15 +43,21 @@ void runtime_boot_count(const char *stage,uint64_t done,uint64_t total){
  NSString *s=[NSString stringWithUTF8String:stage?stage:TOTK_UI("正在启动","Starting")];
  dispatch_async(dispatch_get_main_queue(), ^{
   if(!bootOverlay||bootOverlay.hidden)return;
-  bootStage.text=s;bootDetail.text=[NSString stringWithFormat:@"%llu / %llu",(unsigned long long)done,(unsigned long long)total];
+  bootStage.text=s;
   if(total){bootProgress.hidden=NO;bootProgress.progress=(float)((double)done/(double)total);}
  });
 }
 void runtime_boot_status(const char *stage,const char *detail){
  if(bootStartNS)fprintf(stderr,"[totk-boot] %.3f %s — %s\n",(runtime_now_ns()-bootStartNS)/1e9,stage?stage:"startup",detail?detail:"");
  NSString *s=[NSString stringWithUTF8String:stage?stage:TOTK_UI("正在启动","Starting")];
- NSString *d=[NSString stringWithUTF8String:detail?detail:TOTK_UI("正在处理，请稍候","Working, please wait")];
- dispatch_async(dispatch_get_main_queue(), ^{if(!bootOverlay||bootOverlay.hidden)return;bootStage.text=s;bootDetail.text=d;bootProgress.hidden=YES;});
+ dispatch_async(dispatch_get_main_queue(), ^{if(!bootOverlay||bootOverlay.hidden)return;bootStage.text=s;bootProgress.hidden=YES;});
+}
+/* Why the game cannot start (ios/Sources/main.m): the only text under the stage line. Every other step is the stage line
+   and the bar alone. */
+void runtime_boot_error(const char *stage,const char *detail){
+ runtime_boot_status(stage,detail);
+ NSString *d=[NSString stringWithUTF8String:detail];
+ dispatch_async(dispatch_get_main_queue(), ^{bootDetail.text=d;});
 }
 /* Shader and pipeline warm-up progress (nvn_mtl.m warm_start), shown while the start-up screen is up: on iOS the title
    waits for the warm-up (TOTK_WARM_BEFORE_TITLE), also with a complete pipeline archive, where the Mac no longer waits.
@@ -64,7 +69,6 @@ void runtime_warm_progress(uint64_t done,uint64_t total,uint64_t shaders,uint64_
   if(!bootOverlay||bootOverlay.hidden)return;
   double frac=total ? fmin(1.0,(double)done/(double)total) : 1.0;
   bootStage.text=[NSString stringWithFormat:@(TOTK_UI("预热着色器与管线 %.0f%%","Warming shaders and pipelines %.0f%%")),floor(frac*100.0)];
-  bootDetail.text=[NSString stringWithFormat:@(TOTK_UI("已处理 %llu/%llu 项","%llu/%llu items")),(unsigned long long)done,(unsigned long long)total];
   bootProgress.hidden=NO;bootProgress.progress=(float)frac;
  });
 }
@@ -142,7 +146,7 @@ void runtime_ios_attach_layer(CAMetalLayer *layer,UIView *host){
  CGFloat w=host.bounds.size.width,h=host.bounds.size.height;
  bootStage=[[UILabel alloc] initWithFrame:CGRectMake(0,h/2-50,w,36)];bootStage.text=@(TOTK_UI("正在启动海拉鲁","Starting Hyrule"));bootStage.textColor=UIColor.whiteColor;
  bootStage.font=[UIFont systemFontOfSize:24 weight:UIFontWeightSemibold];bootStage.textAlignment=NSTextAlignmentCenter;
- bootDetail=[[UILabel alloc] initWithFrame:CGRectMake(24,h/2-8,w-48,36)];bootDetail.text=@(TOTK_UI("正在准备游戏环境","Preparing the game environment"));bootDetail.textColor=[UIColor colorWithWhite:0.72 alpha:1];
+ bootDetail=[[UILabel alloc] initWithFrame:CGRectMake(24,h/2-8,w-48,36)];bootDetail.textColor=[UIColor colorWithWhite:0.72 alpha:1];
  bootDetail.font=[UIFont systemFontOfSize:14];bootDetail.textAlignment=NSTextAlignmentCenter;
  bootDetail.numberOfLines=2;bootDetail.adjustsFontSizeToFitWidth=YES;bootDetail.minimumScaleFactor=0.6;   /* a message (no game data) fits in two lines */
  bootProgress=[[UIProgressView alloc] initWithFrame:CGRectMake(w/2-140,h/2+30,280,8)];bootProgress.hidden=YES;

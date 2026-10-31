@@ -153,7 +153,7 @@ int main(int argc, char **argv) {
     /* The preset layer: Full HD is the game's docked settings with its own drawable and scene; the frame row's 60 is
        the uncapped path and its 30 holds, exactly what the runtime did before the pane had a custom layer. */
     preset(1, "docked", "1080", "1600x900", "0");
-    preset(0, "handheld", NULL, NULL, "0");
+    preset(0, "handheld", NULL, "0", "0");
     preset_frame("30", NULL, "30");
     preset_frame("60", NULL, NULL);
     totk_frame_env pf = {"keep", "keep"};
@@ -170,11 +170,6 @@ int main(int argc, char **argv) {
         /* A key without a pane row is never handed over, so it must not claim a layer; DRAWABLE_H is the one such key
            with a history (the picture mode replaced its row). */
         failures++; fprintf(stderr, "the key -> layer table is not what main.m and the tests expect\n");
-    }
-    /* The in-game button: the preset layer saves 30 / 60 in its own row; the custom layer leaves the pane's cap alone. */
-    if (!totk_frame_button_key(0) || strcmp(totk_frame_button_key(0), "TOTK_PHONE_FPS") || totk_frame_button_key(1) ||
-        totk_frame_button_target(0) != 30 || totk_frame_button_target(1) != 60) {
-        failures++; fprintf(stderr, "the in-game frame-rate button mapping is wrong\n");
     }
     /* The start screen: both preset rows, the frame rate alone without Full HD, only Play with the custom layer on. */
     if (totk_start_first_row(0, 1) != 0 || totk_start_first_row(0, 0) != 1 || totk_start_first_row(1, 1) != 2 ||

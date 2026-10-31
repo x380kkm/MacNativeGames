@@ -23,7 +23,7 @@ typedef struct {
 typedef struct {
     const char *operation;
     const char *drawable;        /* NULL: leave the runtime's handheld default */
-    const char *scene;           /* TOTK_RENDER_RES, NULL: leave the runtime's default */
+    const char *scene;           /* TOTK_RENDER_RES, "0": the game's own size, NULL: leave the runtime's default */
     const char *output_upscale;
 } totk_preset_env;
 
@@ -61,11 +61,6 @@ totk_key_layer totk_key_layer_of(const char *key);
    asks here, not the switch: the Settings app can flip it while the app runs, and the pane promises that only a relaunch
    takes it, so a run never mixes the layers. */
 extern int totk_custom_layer;
-
-/* The in-game frame-rate button (touch_pad.m). The preset layer saves the choice under its own row; the custom layer
-   keeps the cap in the pane, so the button only holds 30 until the next launch and saves nothing (NULL). */
-const char *totk_frame_button_key(int custom);
-int totk_frame_button_target(int held30);   /* 30 or the normal rate (60); the runtime only knows 30 or not-30 */
 
 /* The first row the start screen shows, of 0 the picture, 1 the frame rate, 2 Play (start_screen.m). The first two are the
    presets, which do not apply with the custom layer on (custom 1), so only Play is left then. has_picture: the pane has

@@ -166,7 +166,7 @@ python3.14 games/totk/ios/tools/install_device.py "<folder>/Tears of the Kingdom
 
 **3. First start:** about 15 s to check the game data, then about 3 minutes of shader import before the title (iPhone 14). Later starts take about 8 s.
 
-On the phone the game renders at 960×540, upscaled to 1280×720, at up to 60 fps. Breath of the Wild 1.6.0 builds and installs the same way.
+On the phone the game renders at 1280×720, at up to 60 fps, and keeps its 16:9 picture: an iPad shows bars above and below. Breath of the Wild 1.6.0 builds and installs the same way.
 
 Two limits:
 - A phone cannot translate shaders while you play: objects whose shader variant the app does not carry are skipped, so a few things can be missing in places no player has reported yet.
@@ -197,7 +197,7 @@ If you no longer have the card image, the update or `prod.keys` but still have a
 The device cannot write code, so an app for iPhone and iPad carries main's code with the game patches already written in, and at start the runtime only checks them (`games/totk/runtime/game_patches_v143.c`). Since upstream `f1d0077` (merged here on 2026-10-30) the build writes two more patches this way, and the code sections of an app built at 30a1b93 lack both:
 
 - The 1.4.3 fix for fade counters above 60 fps (`patch_fade_increment`): four jumps and 80 bytes of added code after the end of the code.
-- The render resolution patch (`patch_render_res`): the four instructions between main+0x585e48 and main+0x585e60. Without it the scene stays at the game's handheld 1280×720, not the 960×540 above, and the Scene resolution setting (Settings app › Apps › Tears of the Kingdom) has no effect.
+- The render resolution patch (`patch_render_res`): the four instructions between main+0x585e48 and main+0x585e60. Without it the Scene resolution setting (Settings app › Apps › Tears of the Kingdom) has no effect.
 
 So this route does not reuse the old app's sections: step 2 makes them again from the recovered modules with this repository's patches, and the runtime takes only those. Neither patch has been seen on a device yet.
 

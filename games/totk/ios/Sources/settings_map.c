@@ -38,12 +38,13 @@ int totk_frame_env_build(const char *cap, totk_frame_env *out) {
 }
 
 /* The Full HD preset is the game's docked settings as the Vision Pro build uses them: 1920x1080 output on a 1080-row
-   drawable with the scene at 1600x900. Off is the handheld default of the runtime (no drawable or scene override).
+   drawable with the scene at 1600x900. Off is the game's handheld picture: the runtime's drawable, and TOTK_RENDER_RES=0 so
+   the scene stays the game's own 1280x720, not the runtime's 960x540 (game_patches_v143.c render_res).
    Breath of the Wild renders its docked scene through its own patch (game_patches_botw.c patch_render_1080) and its
    pane has no scene row, so the scene is left to the game there. */
 int totk_preset_env_build(int docked, totk_preset_env *out) {
     *out = docked ? (totk_preset_env){"docked", "1080", "1600x900", "0"}
-                  : (totk_preset_env){"handheld", NULL, NULL, "0"};
+                  : (totk_preset_env){"handheld", NULL, "0", "0"};
 #ifdef GAME_BOTW
     out->scene = NULL;
 #endif
@@ -76,8 +77,6 @@ totk_key_layer totk_key_layer_of(const char *key) {
 }
 int totk_custom_layer;
 
-const char *totk_frame_button_key(int custom) { return custom ? NULL : "TOTK_PHONE_FPS"; }
-int totk_frame_button_target(int held30) { return held30 ? 60 : 30; }
 int totk_start_first_row(int custom, int has_picture) { return custom ? 2 : has_picture ? 0 : 1; }
 
 /* 720p with the 960x540 scene is the combination that keeps 60 fps the longest on an iPad before the SoC throttles,

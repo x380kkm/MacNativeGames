@@ -111,22 +111,17 @@ class IOSSettings(unittest.TestCase):
         # would be handed over (or dropped) by the wrong layer.
         for key, layer in {'TOTK_DOCKED': 'preset', 'TOTK_PHONE_FPS': 'preset',
                            'TOTK_IOS_PICTURE_MODE': 'custom', 'TOTK_RENDER_RES': 'custom',
-                           'TOTK_FPS_CAP': 'custom', 'TOTK_FPS_OVERLAY': 'always',
-                           'TOTK_ASPECT': 'always'}.items():
+                           'TOTK_FPS_CAP': 'custom', 'TOTK_FPS_OVERLAY': 'always'}.items():
             with self.subTest(key=key, layer=layer):
                 run = subprocess.run([str(executable), '--layer', key], capture_output=True, text=True)
                 self.assertEqual(run.stdout.strip(), layer, key)
 
-    def test_aspect_ratio_row_offers_only_valid_values(self):
-        # aspect_parse takes "" (the game's own framing), "0" (16:9) and explicit ratios; "display" was dropped with
-        # fitting the window (runtime/aspect_math.h) and would make the game runtime_fail, so the pane must not offer it.
-        rows = self._rows()
-        row = rows['TOTK_ASPECT']
-        self.assertEqual(row['DefaultValue'], '')
-        self.assertIn('', row['Values'])
-        self.assertIn('0', row['Values'])
-        self.assertNotIn('display', row['Values'])
-        self.assertEqual(len(row['Values']), len(row['Titles']))
+    def test_the_picture_stays_16_9(self):
+        # Filling an iPad's 4:3 narrows the camera and flattens the HUD, so the pane has no row for it, and what an earlier
+        # build stored for the row is never read: main.m only walks the pane's rows.
+        self.assertNotIn('TOTK_ASPECT', self._rows())
+        main = (ROOT / 'games/totk/ios/Sources/main.m').read_text(encoding='utf-8')
+        self.assertIn('setenv("TOTK_ASPECT","0",0);', main)
 
     def test_scene_values_are_sizes(self):
         # build_ipa.py embeds one of these sizes in the exported patch, and main.m rejects a stored value the row does
@@ -185,7 +180,7 @@ class IOSSettings(unittest.TestCase):
         for key in ('TOTK_FPS_OVERLAY', 'TOTK_SHADER_OVERLAY'):
             self.assertIn(key, rows)
             self.assertEqual(rows[key]['Type'], 'PSToggleSwitchSpecifier')
-            self.assertIs(rows[key]['DefaultValue'], True)
+            self.assertIs(rows[key]['DefaultValue'], False)   # nothing is drawn over the game unless the player asks
 
 
     def test_behaviours_the_code_turns_on_have_an_off_row(self):
@@ -229,7 +224,6 @@ class IOSSettings(unittest.TestCase):
         self.assertEqual(sum(len(re.findall(r'totk_custom_layer = ', text)) for text in texts.values()), 1)
         self.assertIn('if (totk_custom_layer) return;',
                       re.search(r'static void apply_display_settings\(void\) \{.*?\n}', texts['main.m'], re.S).group())
-        self.assertIn('totk_frame_button_key(totk_custom_layer)', texts['touch_pad.m'])
         self.assertIn('totk_start_first_row(totk_custom_layer,', texts['start_screen.m'])
 
     def test_every_row_is_applied_at_launch(self):

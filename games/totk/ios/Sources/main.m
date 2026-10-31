@@ -21,6 +21,7 @@ int totk_host_main(int argc, char **argv);
 void runtime_ios_attach_layer(CAMetalLayer *layer, UIView *host);
 void runtime_ios_sync_drawable(UIView *host);
 void runtime_ios_sync_safe_area(UIView *host);
+void runtime_boot_error(const char *stage, const char *detail);
 static char *host_argv[3];
 static NSString *g_no_game_data;   // set when there is no RomFS image to play from (didFinishLaunching)
 static NSString *g_seed_pack, *g_seed_unpack_to;   // a pushed shader pack to unpack before the game starts (seed_unpack)
@@ -91,7 +92,7 @@ static void apply_display_settings(void);   // below, next to the pane helpers i
 - (void)safeAreaInsetsDidChange { [super safeAreaInsetsDidChange]; runtime_ios_sync_safe_area(self); }   // the HUD boxes keep out of the notch
 @end
 
-@interface TOTKGameController : UIViewController @property(nonatomic,strong) TOTKMetalView *gameView; @property(nonatomic,strong) TOTKTouchPad *touchPad; @end
+@interface TOTKGameController : UIViewController @property(nonatomic,strong) TOTKMetalView *gameView; @end
 @implementation TOTKGameController
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -106,7 +107,7 @@ static void apply_display_settings(void);   // below, next to the pane helpers i
 #endif
     [self.view addSubview:self.gameView];
     runtime_ios_attach_layer((CAMetalLayer *)self.gameView.layer, self.gameView);
-    TOTKTouchPad *pad=[[TOTKTouchPad alloc] initWithFrame:self.view.bounds];pad.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;[self.view addSubview:pad];self.touchPad=pad;
+    TOTKTouchPad *pad=[[TOTKTouchPad alloc] initWithFrame:self.view.bounds];pad.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;[self.view addSubview:pad];
 }
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
@@ -115,7 +116,7 @@ static void apply_display_settings(void);   // below, next to the pane helpers i
        one laid over it showed both texts on top of each other (2026-10-23). */
     BOOL zh = [NSLocale.preferredLanguages.firstObject hasPrefix:@"zh"];   // the same rule as the boot screen (totk_ui_lang.h)
     if (g_no_game_data) {
-        runtime_boot_status(zh ? "无法开始游戏" : "Cannot start the game", g_no_game_data.UTF8String);
+        runtime_boot_error(zh ? "无法开始游戏" : "Cannot start the game", g_no_game_data.UTF8String);
         return;
     }
 #if TARGET_OS_VISION
@@ -124,15 +125,14 @@ static void apply_display_settings(void);   // below, next to the pane helpers i
     __weak TOTKGameController *weak = self;
     void (^start)(void) = ^{
         apply_display_settings();
-        [weak.touchPad setNeedsDisplay];   // its frame rate button has to show the rate just applied
         runtime_ios_sync_drawable(weak.gameView);   // the drawable follows the chosen picture (TOTK_IOS_DRAWABLE_H)
         [weak boot];
     };
-    /* A run started by a script skips the start screen, which would wait for a tap: devicectl ... --environment-variables
-       '{"TOTK_START_SCREEN":"0"}'. The Settings app's choices apply as they are (after PR #1174). */
+    /* The game starts at once with the Settings app's choices. The start screen, which waits for a tap, comes up only when
+       a launch asks for it: devicectl ... --environment-variables '{"TOTK_START_SCREEN":"1"}'. */
     const char *screen = getenv("TOTK_START_SCREEN");
-    if (screen && !strcmp(screen, "0")) start();
-    else [self.view addSubview:[[TOTKStartView alloc] initWithFrame:self.view.bounds onStart:start]];
+    if (screen && !strcmp(screen, "1")) [self.view addSubview:[[TOTKStartView alloc] initWithFrame:self.view.bounds onStart:start]];
+    else start();
 #endif
 }
 - (void)boot {
@@ -147,7 +147,7 @@ static void apply_display_settings(void);   // below, next to the pane helpers i
             NSString *why = seed_unpack(pack, to, ^(uint64_t done, uint64_t total) { runtime_boot_progress(stage, done, total); });
             fprintf(stderr, "[totk] shader pack: %s in %.1f s\n", why ? why.UTF8String : "ready", CFAbsoluteTimeGetCurrent() - t0);
             dispatch_async(dispatch_get_main_queue(), ^{
-                if (why) { runtime_boot_status(zh ? "着色器准备失败" : "Could not prepare the shaders", (zh
+                if (why) { runtime_boot_error(zh ? "着色器准备失败" : "Could not prepare the shaders", (zh
                                ? [NSString stringWithFormat:@"%@。请在 Mac 上用 ios/tools/install_device.py 重新安装。", why]
                                : [NSString stringWithFormat:@"%@. Install again from the Mac with ios/tools/install_device.py.", why]).UTF8String); return; }
                 [self startGame];
@@ -248,9 +248,8 @@ static void apply_frame_env(const totk_frame_env *e, int overwrite) {
 }
 
 #if !TARGET_OS_VISION
-/* The preset row's rate for the run about to start. The runtime reads TOTK_PHONE_FPS once, and the touch controls' first draw
-   has usually done that before the start screen's pick (hle_nvn.c phone_holds_30), so the runtime is told as well as the
-   variable. A value that is not the row's changes nothing; apply_settings has logged it. */
+/* The preset row's rate for the run about to start. The runtime reads TOTK_PHONE_FPS once (hle_nvn.c phone_holds_30), so it
+   is told as well as the variable. A value that is not the row's changes nothing; apply_settings has logged it. */
 static void apply_preset_frame_rate(const char *fps) {
     totk_frame_env fe;
     if (!totk_preset_frame_env_build(fps, &fe)) return;
@@ -273,7 +272,7 @@ static void apply_display_settings(void) {
     if (prenv.scene) setenv("TOTK_RENDER_RES", prenv.scene, 0);
     setenv("TOTK_MFX_OUTPUT", prenv.output_upscale, 0);
     apply_operation_mode(prenv.operation);
-    // Frame rate: Settings.bundle › TOTK_PHONE_FPS, or the 60 / 30 button of the touch controls, which saves it here too.
+    // Frame rate: Settings.bundle › TOTK_PHONE_FPS.
     NSString *fps = [d stringForKey:@"TOTK_PHONE_FPS"] ?: @"60";
     apply_preset_frame_rate(fps.UTF8String);
 }
@@ -326,13 +325,6 @@ static void apply_settings(void) {
         } else if ([value isKindOfClass:NSString.class] && [value length] && [value length] < 64) {
             /* services.c takes a language code of up to 7 bytes and runtime_fails on a longer one. */
             if ([key isEqualToString:@"TOTK_LANG"] && [value length] > 7) continue;
-            /* The pane offers "" (fill the screen, never handed over) and "0" (16:9). Anything else - the old
-               "display" default, another platform's ratio - would reach aspect_install, whose phone branch treats every
-               value but "0"/"16:9" as fill without saying so. */
-            if ([key isEqualToString:@"TOTK_ASPECT"] && ![value isEqualToString:@"0"] && ![value isEqualToString:@"16:9"]) {
-                fprintf(stderr, "[totk] settings: aspect ratio \"%s\" is not a pane value; filling the screen\n", [value UTF8String]);
-                continue;
-            }
             setenv(key.UTF8String, [value UTF8String], 0);
         }
         /* overwrite=0: a devicectl value for a plain key still wins. The layer block below owns the picture and frame
@@ -548,7 +540,10 @@ static void apply_player_mods(NSString *mods, NSString *appMods) {
     setenv("TOTK_MFX_UPSCALE","0",0);
     setenv("TOTK_FPS_OVERLAY","0",0);
 #else
-    /* The picture and frame rate are applied when the game starts (apply_display_settings), after the start screen. */
+    /* The game's own 16:9 picture, with bars on a screen of another shape: filling an iPad's 4:3 narrows the camera and
+       flattens the HUD (runtime/aspect_patch.h). overwrite=0: TOTK_ASPECT from devicectl still wins. */
+    setenv("TOTK_ASPECT","0",0);
+    /* The picture and frame rate are applied when the game starts (apply_display_settings). */
 #endif
     // Game language: the Settings app (Settings.bundle › TOTK_LANG) stores the choice in our defaults; empty means the
     // system language, which is what the runtime already follows. iOS 27 does not honour Info.plist LSEnvironment, so

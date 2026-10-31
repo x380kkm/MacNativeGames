@@ -60,7 +60,7 @@
 			<key>Title</key>
 			<string>畫面 · Display</string>
 			<key>FooterText</key>
-			<string>開啟：遊戲的底座設定，輸出 1920×1080、內部 1600×900，需要較快的 iPad。關閉：手持 1280×720（內部 960×540）。重新啟動遊戲後生效 · on: the game's docked settings, 1920×1080 output, 1600×900 inside (for a fast iPad). Off: handheld 1280×720 (960×540 inside). Takes effect after relaunching the game</string>
+			<string>開啟：遊戲的底座設定，輸出 1920×1080。關閉：手持 1280×720。重新啟動遊戲後生效 · on: the game's docked settings, 1920×1080 output. Off: handheld 1280×720. Takes effect after relaunching the game</string>
 		</dict>
 		<dict>
 			<key>Type</key>
@@ -78,43 +78,9 @@
 			<key>Type</key>
 			<string>PSGroupSpecifier</string>
 			<key>Title</key>
-			<string>画面比例 · Aspect ratio</string>
-			<key>FooterText</key>
-			<string>与预设、自定义无关，两种模式下都生效。重新启动游戏后生效 · independent of the presets and the custom layer; applies in both. Takes effect after relaunching</string>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSRadioGroupSpecifier</string>
-			<key>Key</key>
-			<string>TOTK_ASPECT</string>
-			<key>TOTKApp</key>
-			<string>totk</string>
-			<key>TOTKPhone</key>
-			<true/>
-			<key>Title</key>
-			<string>画面比例 · Aspect ratio</string>
-			<key>DefaultValue</key>
-			<string></string>
-			<key>Values</key>
-			<array>
-				<string></string>
-				<string>0</string>
-			</array>
-			<key>Titles</key>
-			<array>
-				<string>填满屏幕（按屏幕比例取景）· Fill the screen</string>
-				<string>16:9（黑边）· 16:9 letterbox</string>
-			</array>
-			<key>FooterText</key>
-			<string>填满屏幕不拉伸画面：相机按屏幕比例取景，呈现时再还原比例。iPad 比 16:9 窄，所以两侧会少一点、上下填满；16:9 保留完整宽度并加黑边。部分 UI 特效可能随取景偏移 · fill does not stretch: the camera takes the screen's aspect and the present pass restores the proportions. An iPad is narrower than 16:9, so a little is lost at the sides and the height is filled; 16:9 keeps the full width with bars. A few UI effects may sit off with this framing</string>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSGroupSpecifier</string>
-			<key>Title</key>
 			<string>幀率 · Frame rate</string>
 			<key>FooterText</key>
-			<string>鎖 30 幀畫面更穩、手機更涼；遊戲中也可以點觸控按鍵中間的 60 / 30 切換 · 30 is steadier and keeps the phone cooler; the 60 / 30 button between − and + of the touch controls switches it while playing</string>
+			<string>鎖 30 幀畫面更穩、手機更涼。重新啟動遊戲後生效 · 30 is steadier and keeps the phone cooler. Takes effect after relaunching the game</string>
 		</dict>
 		<dict>
 			<key>Type</key>
@@ -418,7 +384,7 @@
 			<key>Title</key>
 			<string>界面 · Interface</string>
 			<key>FooterText</key>
-			<string>重启游戏后生效 · takes effect after relaunching</string>
+			<string>默认关闭。重启游戏后生效 · Off by default; takes effect after relaunching</string>
 		</dict>
 		<dict>
 			<key>Type</key>
@@ -430,9 +396,7 @@
 			<key>Title</key>
 			<string>状态行（右上角）· Status line (top-right)</string>
 			<key>DefaultValue</key>
-			<true/>
-			<key>FooterText</key>
-			<string>显示帧率、上屏尺寸和 MetalFX 是否生效；行尾是待补译的着色器数量 · shows the frame rate, the presented size and whether MetalFX is upscaling, ending with the number of shaders waiting for translation</string>
+			<false/>
 		</dict>
 		<dict>
 			<key>Type</key>
@@ -444,9 +408,7 @@
 			<key>Title</key>
 			<string>着色器与管线（左下角）· Shaders and pipelines (bottom-left)</string>
 			<key>DefaultValue</key>
-			<true/>
-			<key>FooterText</key>
-			<string>显示本次新翻译的着色器 / 缓存总数，以及本次新建的渲染管线；收集到新东西时会变黄 · shows the shaders translated this run against the cache total, plus the render pipelines built this run; it turns yellow when something new is collected</string>
+			<false/>
 		</dict>
 		<dict>
 			<key>Type</key>
@@ -454,7 +416,7 @@
 			<key>Title</key>
 			<string>模组 · Mods</string>
 			<key>FooterText</key>
-			<string>在电脑上生成四个文件夹（make_gameplay_tuning.py --slots）并复制到设备（push_device_windows.py push-slots）后，这里选用 Documents/mods/&lt;版本&gt;-&lt;档位&gt;。没有这个文件夹时用 Documents/mods/&lt;版本&gt;，再没有就用 App 自带的同一档，都没有就不加载模组。耐久只影响模组生效后新拿到的武器、盾和弓；电池格数和回充前的等待不变。重新启动游戏后生效 · picks Documents/mods/&lt;version&gt;-&lt;slot&gt;, once the four folders are made on the PC (make_gameplay_tuning.py --slots) and copied to the device (push_device_windows.py push-slots). Without that folder the game uses Documents/mods/&lt;version&gt;, then the same slot inside the app, or no mod. Durability applies to weapons, shields and bows obtained after the mod is in; the battery's cells and the pause before it recharges stay as they are. Takes effect after relaunching the game</string>
+			<string>耐久只影响模组生效后新拿到的武器、盾和弓。重新启动游戏后生效 · Durability applies to weapons, shields and bows obtained after the mod is in. Takes effect after relaunching the game</string>
 		</dict>
 		<dict>
 			<key>Type</key>
@@ -506,7 +468,7 @@
 			<key>Title</key>
 			<string>图形排查 · Graphics troubleshooting</string>
 			<key>FooterText</key>
-			<string>一般保持默认。画面或启动出问题时，逐项设为“关”来比较。遮挡查询保护：无法确认的遮挡结果按可见处理，最多多画被挡住的物体。同图双槽：同一张图挂在两个颜色槽时，只写回绘制过的那一个。未对齐内存池：系统无法建立别名的内存池仍然有效，不让启动时的内存映射失败。重新启动游戏后生效 · Leave these at Default. If the picture or the game's start goes wrong, set them to Off one at a time to compare. Occlusion guard: an occlusion result that cannot be vouched for reads visible, so at worst a hidden object is drawn. One image at two colour slots: only the slot that was drawn is stored. Unaligned memory pool: a pool the system cannot alias stays valid, so the memory mapping at the game's start does not fail. Takes effect after relaunching the game</string>
+			<string>一般保持默认。重新启动游戏后生效 · Leave these at Default. Takes effect after relaunching the game</string>
 		</dict>
 		<dict>
 			<key>Type</key>

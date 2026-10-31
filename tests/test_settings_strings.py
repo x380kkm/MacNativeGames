@@ -47,12 +47,11 @@ class SettingsStrings(unittest.TestCase):
         self.assertNotIn("enough memory", botw)
         self.assertNotIn("内存足够", botw)
 
-    def test_the_mods_footer_holds_for_every_version(self):
-        """The row ships in every Tears of the Kingdom build, and each reads the folder of its own version."""
+    def test_the_mods_footer_is_for_the_player(self):
+        """The row ships in every Tears of the Kingdom build; the folders and tools behind it are the install guide's."""
         footer = self.footer(plistlib.loads(ROOT.read_bytes()), "TOTK_MOD_SLOT")
-        self.assertNotIn("v143", footer)
-        self.assertIn("Documents/mods/<version>-<slot>", footer)
-        self.assertIn("Documents/mods/<版本>-<档位>", footer)
+        for internal in ("v143", "Documents/", ".py"):
+            self.assertNotIn(internal, footer)
 
     def test_written_bundle(self):
         with tempfile.TemporaryDirectory() as d:
