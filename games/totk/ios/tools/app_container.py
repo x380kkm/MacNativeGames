@@ -47,13 +47,16 @@ def file_range(source, offset, length):
 
 
 def ipa_info(ipa):
-    """The Info.plist of the app in an IPA, with 'carries': whether the app holds its shader seed and its RomFS image."""
+    """The Info.plist of the app in an IPA, with 'carries': whether the app holds its shader seed and its RomFS image, one
+    romfs.bin or its parts."""
     with zipfile.ZipFile(ipa) as z:
         plists = [n for n in z.namelist() if n.count('/') == 2 and n.startswith('Payload/') and n.endswith('.app/Info.plist')]
         require(len(plists) == 1, f'{ipa}: not one Payload/<name>.app')
         info = plistlib.loads(z.read(plists[0]))
-        info['carries'] = {k: f'{plists[0][:-len("Info.plist")]}GameData/{v}' in z.namelist()
-                           for k, v in (('seed', 'shader-seed/seed-manifest.json'), ('romfs', 'romfs/romfs.bin'))}
+        data = f'{plists[0][:-len("Info.plist")]}GameData/'
+        names = set(z.namelist())
+        info['carries'] = {'seed': f'{data}shader-seed/seed-manifest.json' in names,
+                           'romfs': f'{data}romfs/romfs.bin' in names or f'{data}romfs/romfs.bin.000' in names}
     return info
 
 

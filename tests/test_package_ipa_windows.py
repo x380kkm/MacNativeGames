@@ -13,6 +13,7 @@ import io
 import json
 import os
 import plistlib
+import shutil
 import struct
 import sys
 import tempfile
@@ -315,6 +316,49 @@ class GameData(unittest.TestCase):
             self.assertEqual(sorted(p.relative_to(res).as_posix() for p in res.rglob('*') if p.is_file()),
                              ['game-data/runtime-tables.bin', 'romfs-patches-out/1920x1080/manifest.tsv', 'romfs-patches/a/b.zs',
                               'romfs/index.json', 'shared-fonts/0-standard.bfttf'])
+
+    def test_the_image_goes_into_the_app_in_parts_the_app_finds(self):
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(package.push, 'PART', 2):
+            tree, res = Path(d)/'tree', Path(d)/'GameData'
+            self.tree(tree)
+            self.assertEqual(package.game_data(tree, res, 'app'), 8)   # the 5 other files and 3 parts of 'image'
+            parts = sorted(p.name for p in (res/'romfs').glob('romfs.bin*'))
+            self.assertEqual(parts, ['romfs.bin.000', 'romfs.bin.001', 'romfs.bin.002'])
+            self.assertEqual(b''.join((res/'romfs'/p).read_bytes() for p in parts), b'image')
+        main = (package.IOS/'Sources/main.m').read_text(encoding='utf-8')
+        self.assertIn('@"romfs/romfs.bin.000"', main)
+
+    def slots(self, folder):
+        for slot in package.push.MOD_SLOTS:
+            data = f'{slot} font'.encode()
+            mod = folder/f'v143-{slot}'
+            (mod/'Font').mkdir(parents=True)
+            (mod/'Font/a.bfotf').write_bytes(data)
+            (mod/'.mod-original').mkdir()
+            (mod/'.mod-original/a').write_bytes(b'kept on the PC')
+            (mod/'.gameplay-tuning.json').write_text('{}')
+            (mod/'manifest.tsv').write_text(f'# path\tsize\tsha256\toriginal_sha256\nFont/a.bfotf\t{len(data)}\t{digest(data)}\t{digest(b"")}\n', newline='\n')
+
+    def test_the_slot_folders_go_into_the_app_as_the_device_would_get_them(self):
+        with tempfile.TemporaryDirectory() as d:
+            folder, mods = Path(d)/'mods', Path(d)/'GameData/mods'
+            self.slots(folder)
+            self.assertEqual(package.bundled_mods(folder, mods), 8)
+            self.assertEqual(sorted(p.relative_to(mods).as_posix() for p in mods.rglob('*') if p.is_file()),
+                             sorted(f'v143-{slot}/{name}' for slot in package.push.MOD_SLOTS for name in ('Font/a.bfotf', 'manifest.tsv')))
+            self.assertEqual((mods/'v143-max/Font/a.bfotf').read_bytes(), b'max font')
+            self.assertEqual((mods/'v143-max/manifest.tsv').read_bytes(), (folder/'v143-max/manifest.tsv').read_bytes())
+
+    def test_a_slot_the_game_would_refuse_stops_it(self):
+        with tempfile.TemporaryDirectory() as d:
+            folder, mods = Path(d)/'mods', Path(d)/'GameData/mods'
+            self.slots(folder)
+            (folder/'v143-max/Font/a.bfotf').write_bytes(b'changed')
+            with self.assertRaises(package.push.PushError):
+                package.bundled_mods(folder, mods)
+            shutil.rmtree(folder/'v143-max')
+            with self.assertRaises(package.push.PushError):
+                package.bundled_mods(folder, mods)
 
     def test_a_file_changed_since_recover_ipa_checked_it_stops_it(self):
         with tempfile.TemporaryDirectory() as d:

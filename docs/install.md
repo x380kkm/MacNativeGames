@@ -246,6 +246,8 @@ It writes the nine code sections of step 2 into the runtime (`--sections <folder
 
 The tool reads the commit the runtime was built from out of `TOTK-runtime.commit` and prints it in step 3/6 ("source commit: …"). It writes that commit into `TOTK-package.json`, and into `Info.plist` as `TOTKSourceCommit` when the old app has that key. `--source-commit <commit>` names the commit by hand and wins over the file. A `TOTK-runtime.zip` from before the workflow wrote that file names no commit: the tool then records this checkout's HEAD and prints a warning, so for such a runtime give `--source-commit` with the commit its run built. On the Windows PC this was measured on (2026-10-26), the first packaging with a seed took about 8 minutes and wrote the device's seed folder (91,304 files, nearly all of them hard links into the seed). A second packaging with the same seed took under a minute.
 
+**An IPA that plays once it is installed.** The default IPA is about 75 MB and holds no game image and no shaders, so the app shows "No game data" until step 6 has copied them. Add `--game-data app --mods <work>/mods` for an IPA that holds them, about 18 GB, for installing without this PC: the image as 1 GiB parts, because zsign cannot seal one file of 4 GiB or more, the shaders, and the four slot folders of [Durability and battery presets](#durability-and-battery-presets-on-windows). A mod folder copied to the device later wins over the one in the app. Step 6 is then not needed.
+
 **6. Install and copy the game data:**
 
 ```powershell

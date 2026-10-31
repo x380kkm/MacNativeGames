@@ -433,10 +433,11 @@ static void apply_settings(void) {
    <mods>-<slot> when the Settings pane's mod slot (TOTK_MOD_SLOT, handed over by apply_settings) has a manifest.tsv
    there (scripts/make_gameplay_tuning.py --slots makes these folders, one per slot), else `mods`, which is
    Documents/mods/<version> (TOTK_GAME_DIR, v143 for 1.4.3), when it holds one (scripts/make_mod_manifest.py and
-   make_button_icons.py write one; ios/tools/push_device_windows.py push-mod copies a mod folder there). A slot is
-   lower-case letters, so it stays a folder name below mods. overwrite=0 keeps a devicectl TOTK_ROMFS_MODS winning
-   ("0" loads none). tests/test_ios_mod_slot.py runs this function on macOS. */
-static void apply_player_mods(NSString *mods) {
+   make_button_icons.py write one; ios/tools/push_device_windows.py push-mod copies a mod folder there), else
+   <appMods>-<slot>, the slot inside the app (package_ipa_windows.py --mods), so a folder on the device wins over the
+   one the app came with. A slot is lower-case letters, so it stays a folder name below mods. overwrite=0 keeps a
+   devicectl TOTK_ROMFS_MODS winning ("0" loads none). tests/test_ios_mod_slot.py runs this function on macOS. */
+static void apply_player_mods(NSString *mods, NSString *appMods) {
     NSFileManager *fm = NSFileManager.defaultManager;
     NSString *chosen = nil, *why;
     const char *slot = getenv("TOTK_MOD_SLOT"), *launchMods = getenv("TOTK_ROMFS_MODS");
@@ -447,8 +448,14 @@ static void apply_player_mods(NSString *mods) {
         chosen = slotMods; why = [NSString stringWithFormat:@"mod slot %s",slot];
     } else {
         why = slotMods ? [NSString stringWithFormat:@"no %@/manifest.tsv for mod slot %s",slotMods,slot] : @"no mod slot";
+        NSString *appSlotMods = slotMods ? [appMods stringByAppendingFormat:@"-%s",slot] : nil;
         if ([fm fileExistsAtPath:[mods stringByAppendingPathComponent:@"manifest.tsv"]]) chosen = mods;
-        else why = [why stringByAppendingFormat:@", no %@/manifest.tsv",mods];
+        else {
+            why = [why stringByAppendingFormat:@", no %@/manifest.tsv",mods];
+            if (appSlotMods && [fm fileExistsAtPath:[appSlotMods stringByAppendingPathComponent:@"manifest.tsv"]]) {
+                chosen = appSlotMods; why = [why stringByAppendingFormat:@", the app's mod slot %s",slot];
+            }
+        }
     }
     if (chosen) setenv("TOTK_ROMFS_MODS",chosen.fileSystemRepresentation,0);
     if (launchMods) why = @"TOTK_ROMFS_MODS from the launch";
@@ -498,7 +505,8 @@ static void apply_player_mods(NSString *mods) {
     if (image && !copying) {
         [[NSURL fileURLWithPath:gameData isDirectory:YES] setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:nil];
         setenv("TOTK_ROMFS_DATA",gameData.fileSystemRepresentation,1);
-    } else if (![fm fileExistsAtPath:[res stringByAppendingPathComponent:@"romfs/romfs.bin"]]) {
+    } else if (![fm fileExistsAtPath:[res stringByAppendingPathComponent:@"romfs/romfs.bin"]] &&
+               ![fm fileExistsAtPath:[res stringByAppendingPathComponent:@"romfs/romfs.bin.000"]]) {   // package_ipa_windows.py --game-data app
         /* No image to play from: said on the screen instead of the game ending at once (runtime_fail exits). */
         BOOL zh = [NSLocale.preferredLanguages.firstObject hasPrefix:@"zh"];
         NSString *app = [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleDisplayName"] ?: @"TOTK";   // the Files app's folder name
@@ -549,7 +557,7 @@ static void apply_player_mods(NSString *mods) {
     if (lang.length>0&&lang.length<8) setenv("TOTK_LANG",lang.UTF8String,0);
     setenv("TOTK_ROMFS_PATCHES",[res stringByAppendingPathComponent:@"romfs-patches"].fileSystemRepresentation,1);
     setenv("TOTK_ROMFS_PATCHES_OUT",[res stringByAppendingPathComponent:@"romfs-patches-out"].fileSystemRepresentation,1);
-    apply_player_mods([docs stringByAppendingPathComponent:@"mods/" TOTK_GAME_DIR]);
+    apply_player_mods([docs stringByAppendingPathComponent:@"mods/" TOTK_GAME_DIR],[res stringByAppendingPathComponent:@"mods/" TOTK_GAME_DIR]);
     setenv("TOTK_SHARED_FONTS",[res stringByAppendingPathComponent:@"shared-fonts"].fileSystemRepresentation,1);
     NSString *aoc = [res stringByAppendingPathComponent:@"aoc"];   // Breath of the Wild's add-on content packs (build_ipa.py; runtime/aoc_romfs.c)
     if ([fm fileExistsAtPath:aoc]) setenv("TOTK_AOC",aoc.fileSystemRepresentation,1);

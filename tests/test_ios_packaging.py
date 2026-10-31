@@ -166,7 +166,7 @@ class PlayerMods(unittest.TestCase):
         import push_device_windows
         game = TOOLS.parents[1]
         main = (TOOLS.parent/'Sources/main.m').read_text(encoding='utf-8')
-        self.assertIn('    apply_player_mods([docs stringByAppendingPathComponent:@"mods/" TOTK_GAME_DIR]);', main)
+        self.assertIn('    apply_player_mods([docs stringByAppendingPathComponent:@"mods/" TOTK_GAME_DIR],[res stringByAppendingPathComponent:@"mods/" TOTK_GAME_DIR]);', main)
         self.assertIn('[mods stringByAppendingFormat:@"-%s",slot]', main)
         self.assertEqual(push_device_windows.mod_target('v143', 'strong'), 'v143-strong')
         slot_first = (main.index('[slotMods stringByAppendingPathComponent:@"manifest.tsv"]'),

@@ -6,7 +6,7 @@ signed with zsign. build_ipa.py and install_device.py do this on a Mac with Xcod
   python package_ipa_windows.py <TOTK-runtime.zip | TOTK.app> --tree <work>/totk --out <dir>/<name>.ipa
          --p12 <certificate.p12> --p12-password-file <file> --profile <profile.mobileprovision> [--zsign <zsign.exe>]
          [--seed <seed folder> [--metallibs <folder>]] [--source-commit <commit>] [--game-data documents | app]
-         [--sections <folder>] [--unsigned-only]
+         [--mods <folder>] [--sections <folder>] [--unsigned-only]
   python package_ipa_windows.py <TOTK-runtime.zip | TOTK.app> --tree <work>/totk --check-only [--sections <folder>]
 
 The runtime: the ios-runtime workflow's artifact TOTK-runtime.zip, or the TOTK.app in it (build_ipa.py --runtime-only
@@ -31,9 +31,14 @@ none, its default.metallib when the runtime lacks one.
 GameData (ios/Sources/main.m): game-data, romfs (runtime-index.bin, index.json, merge.log), romfs-patches,
 romfs-patches-out and shared-fonts from the tree, each file checked against <tree>/recover-manifest.json when there is
 one. --game-data documents (the default) leaves romfs.bin and the shader seed out: push_device_windows.py copies them
-into the app's Documents/GameData once. --game-data app puts both into the app (a 17 GB IPA; large files are hard-linked
-into the staging folder, not copied); zsign cannot sign an app holding the image (sign_ipa_windows.large_files), so with
-it only <name>-unsigned.ipa is written (--unsigned-only), for a signing tool on a Mac.
+into the app's Documents/GameData once. --game-data app puts both into the app, an IPA of about 18 GB that plays once it
+is installed: the image goes in as romfs.bin.000, .001, ... of 1 GiB, which runtime/romfs.c reads in place, because zsign
+cannot seal one file of 4 GiB or more (sign_ipa_windows.large_files), and the seed's files are hard-linked into the
+staging folder, not copied.
+
+--mods <folder>: the folder make_gameplay_tuning.py --slots wrote. Each of its <version>-<slot> folders goes into
+GameData/mods, its manifest.tsv and the files that lists (push_device_windows.mod_files), checked as the game checks them
+at start, so the Settings pane's mod slot works with nothing copied to the device (main.m apply_player_mods).
 
 --seed <folder>: the shader seed scripts/prepare_shader_seed.py made (seed_windows.py seed: <work>/seed, its
 <folder>.aliases.tsv beside it). It must be of the runtime's translation chain (the rt-<chain> string in the
@@ -41,7 +46,7 @@ executable). Its device form (seed_windows.device_seed) goes beside the IPA as <
 GameData/shader-seed (app); --metallibs adds Metal libraries compiled from this seed elsewhere, none otherwise.
 
 Outputs beside --out: <name>.ipa (signed; verified by sign_ipa_windows.verify), <name>-unsigned.ipa (ad-hoc signed with
-ios/Sources/TOTK.entitlements, like build_ipa.py's, for other signing tools; with the image in the app not signed at all),
+ios/Sources/TOTK.entitlements, like build_ipa.py's, for other signing tools),
 <name>-shader-seed (with --seed, documents), <name>-package.json (inputs, outputs and their SHA-256). The staging folder
 .<name>.staging beside them is removed unless --keep-staging."""
 import argparse, datetime, hashlib, json, plistlib, re, shutil, subprocess, sys, zipfile
@@ -56,6 +61,7 @@ sys.path.insert(0, str(REPO))
 import build_app                    # noqa: E402  sha256 and say, as the Mac build prints them
 from export_ios_windows import EXPORT_DIR   # noqa: E402  where the sections are in the work folder
 import macho                        # noqa: E402  the executable's sections and ios_embed table
+import push_device_windows as push  # noqa: E402  the part size of the image, what a mod folder holds, the slot folders
 import seed_windows                 # noqa: E402  the seed's device form
 import sign_ipa_windows as signing  # noqa: E402
 
@@ -145,6 +151,31 @@ def checked(tree, manifest, rel, full_hash=True):
     return path
 
 
+def image_parts(image, folder):
+    """romfs.bin into folder as romfs.bin.000, .001, ... of push.PART bytes, the last one shorter. Returns how many."""
+    folder.mkdir(parents=True, exist_ok=True)
+    parts = 0
+    with open(image, 'rb') as src:
+        while chunk := src.read(push.PART):
+            (folder/f'romfs.bin.{parts:03d}').write_bytes(chunk)
+            parts += 1
+    return parts
+
+
+def bundled_mods(folder, mods):
+    """The slot folders below folder into mods, the app's GameData/mods, each checked as the game checks it at start.
+    Returns how many files went in."""
+    count = 0
+    for slot in push.MOD_SLOTS:
+        name = push.mod_target(VERSION, slot)
+        files, _ = push.mod_files(folder/name)
+        for path in ['manifest.tsv', *(p for p, _ in files)]:
+            target = mods/name/path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(folder/name/path, target); count += 1
+    return count
+
+
 def game_data(tree, res, mode):
     """The tree's game data into the app's GameData folder res (build_ipa.py lines after 'res=dest/GameData')."""
     manifest = tree_manifest(tree)
@@ -159,13 +190,13 @@ def game_data(tree, res, mode):
             if dst == 'romfs' and ROMFS_IMAGE.match(path.name):
                 if mode != 'app' or path.name != 'romfs.bin':
                     continue
-                seed_windows.link_or_copy(checked(tree, manifest, rel, full_hash=False), res/dst/path.name); count += 1; continue
+                count += image_parts(checked(tree, manifest, rel, full_hash=False), res/dst); continue
             target = res/dst/path.relative_to(tree/src)
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(checked(tree, manifest, rel), target); count += 1
     require((res/'game-data/runtime-tables.bin').is_file(), f'missing game data: {tree}/build/game-data/{VERSION}/runtime-tables.bin')
     if mode == 'app':
-        require((res/'romfs/romfs.bin').is_file(), f'--game-data app needs {tree}/extracted/{VERSION}/romfs/romfs.bin')
+        require((res/'romfs/romfs.bin.000').is_file(), f'--game-data app needs {tree}/extracted/{VERSION}/romfs/romfs.bin')
     return count
 
 
@@ -285,6 +316,7 @@ def arguments():
                    'write nothing')
     p.add_argument('--game-data', choices=('documents', 'app'), default='documents',
                    help='documents (default): romfs.bin and the seed stay out of the app; app: both go into it')
+    p.add_argument('--mods', type=Path, help='the folder make_gameplay_tuning.py --slots wrote: its slot folders go into the app')
     p.add_argument('--seed', type=Path, help='the shader seed folder (prepare_shader_seed.py --output, seed_windows.py seed)')
     p.add_argument('--metallibs', type=Path, help='with --seed: a folder of <variant>_b.metallib compiled from this seed '
                    '(compile_seed.py on a Mac); without it the device compiles every shader from its MSL')
@@ -376,11 +408,6 @@ def main():
     old_app = (a.old_app or tree/'build/from-ipa/app').resolve()
     old_info = plistlib.loads((old_app/'Info.plist').read_bytes()) if (old_app/'Info.plist').is_file() else {}
     zsign = signing.tool('zsign', a.zsign, 'TOTK_ZSIGN')
-    image = tree/f'extracted/{VERSION}/romfs/romfs.bin'
-    if a.game_data == 'app' and not a.unsigned_only and image.is_file() and image.stat().st_size >= signing.ZSIGN_FILE_LIMIT:
-        raise PackageError(f'--game-data app: zsign cannot sign the {image.stat().st_size / 2**30:.0f} GiB image '
-                           '(sign_ipa_windows.large_files); use --game-data documents (the default), or --unsigned-only '
-                           'for an IPA to sign on a Mac')
     identity, ident = identity_of(a, old_info)
     stem = out.stem; staging = out.parent/f'.{stem}.staging'
     shutil.rmtree(staging, ignore_errors=True)
@@ -398,6 +425,8 @@ def main():
         shutil.rmtree(staging/'seed-lists', ignore_errors=True)
         report['seed'] = str(seed_out)
         print(f'  shader seed: {seed_out} ({report["seed_fingerprint"][:12]})')
+    if a.mods:
+        report['mod_files'] = bundled_mods(a.mods.resolve(), app/'GameData/mods')
     level = 0 if a.game_data == 'app' else 1   # the 17 GB image is stored, not compressed
     unsigned = out.with_name(stem + '-unsigned.ipa')
     if signing.large_files(staging):   # the image in the app: written without zsign, and not signed

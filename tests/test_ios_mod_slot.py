@@ -39,10 +39,11 @@ class IosModSlot(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.mods = f'{self.directory.name}/mods/v143'
+        self.app_mods = f'{self.directory.name}/TOTK.app/GameData/mods/v143'
 
-    def folder(self, suffix='', name='manifest.tsv'):
-        """The folder Documents/mods/v143<suffix>, holding a file `name`; a manifest by default."""
-        path = Path(self.mods + suffix)
+    def folder(self, suffix='', name='manifest.tsv', root=None):
+        """The folder Documents/mods/v143<suffix>, or root<suffix>, holding a file `name`; a manifest by default."""
+        path = Path((root or self.mods) + suffix)
         path.mkdir(parents=True)
         (path/name).write_text('# path\tsize\tsha256\toriginal_sha256\n', encoding='utf-8')
 
@@ -50,7 +51,7 @@ class IosModSlot(unittest.TestCase):
         """(the value the runtime is handed, the log line) of a start with TOTK_MOD_SLOT `slot` and TOTK_ROMFS_MODS `launch`."""
         env = {k: v for k, v in os.environ.items() if k not in ('TOTK_MOD_SLOT', 'TOTK_ROMFS_MODS')}
         env.update({k: v for k, v in (('TOTK_MOD_SLOT', slot), ('TOTK_ROMFS_MODS', launch)) if v is not None})
-        run = subprocess.run([str(self.executable), self.mods], env=env, capture_output=True, text=True, timeout=30)
+        run = subprocess.run([str(self.executable), self.mods, self.app_mods], env=env, capture_output=True, text=True, timeout=30)
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
         return run.stdout.strip(), run.stderr.strip()
 
@@ -59,6 +60,30 @@ class IosModSlot(unittest.TestCase):
 
     def loads_none(self, why):
         return '(not set)', f'[totk] player mods: none ({why})'
+
+    def test_the_app_s_slot_is_used_when_the_device_has_no_mod(self):
+        self.folder('-strong', root=self.app_mods)
+        why = f"no {self.mods}-strong/manifest.tsv for mod slot strong, no {self.mods}/manifest.tsv, the app's mod slot strong"
+        self.assertEqual(self.choice('strong'), self.loads(self.app_mods + '-strong', why))
+
+    def test_a_folder_on_the_device_wins_over_the_app_s(self):
+        self.folder('-strong', root=self.app_mods)
+        self.folder('-strong')
+        self.assertEqual(self.choice('strong'), self.loads(self.mods + '-strong', 'mod slot strong'))
+
+    def test_the_plain_folder_on_the_device_wins_over_the_app_s(self):
+        self.folder('-strong', root=self.app_mods)
+        self.folder()
+        self.assertEqual(self.choice('strong'), self.loads(self.mods, f'no {self.mods}-strong/manifest.tsv for mod slot strong'))
+
+    def test_the_app_s_folder_of_another_slot_is_not_taken(self):
+        self.folder('-max', root=self.app_mods)
+        why = f'no {self.mods}-strong/manifest.tsv for mod slot strong, no {self.mods}/manifest.tsv'
+        self.assertEqual(self.choice('strong'), self.loads_none(why))
+
+    def test_without_a_slot_the_app_s_folders_stay_out(self):
+        self.folder('-strong', root=self.app_mods)
+        self.assertEqual(self.choice(), self.loads_none(f'no mod slot, no {self.mods}/manifest.tsv'))
 
     def test_the_chosen_slot_wins_over_the_plain_folder(self):
         self.folder(); self.folder('-strong')

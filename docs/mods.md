@@ -196,7 +196,8 @@ from `Documents/mods/<version>-<slot>` when Settings › Apps › Tears of the K
 to a value whose folder holds one
 (`games/totk/ios/Sources/main.m`; an app whose runtime was built before commit bd81859 loads none). Those folders are in
 the app's container on the device, which a build cannot fill, so there `--mod` merges the code patches only and
-`--install-mod-romfs` is refused. `games/totk/ios/tools/push_device_windows.py push-mod` copies a mod folder and its
+`--install-mod-romfs` is refused. `package_ipa_windows.py --mods` puts the slot folders into the app itself, which the app
+uses when the device has neither folder. `games/totk/ios/tools/push_device_windows.py push-mod` copies a mod folder and its
 manifest there ([install.md](install.md#controller-button-icons-on-windows)).
 
 What the build does, in order:
@@ -638,7 +639,8 @@ App 自己会替换的文件），它其实什么都没替换——这时构建�
 App 从自己的 `Documents/mods/<版本>` 加载玩家 mod 目录，前提是里面有 `manifest.tsv`；“设置 › App › Tears of the Kingdom › 模组 › 耐久与电池”选中的档位在
 `Documents/mods/<版本>-<档位>` 有带 `manifest.tsv` 的文件夹时，改从那里加载（`games/totk/ios/Sources/main.m`；
 运行时在提交 bd81859 之前构建的 App 不加载）。这些目录在设备上 App 的容器里，构建填不了，
-所以那里 `--mod` 只合并代码补丁，`--install-mod-romfs` 会被拒绝。
+所以那里 `--mod` 只合并代码补丁，`--install-mod-romfs` 会被拒绝。`package_ipa_windows.py --mods` 把档位文件夹放进 App 本身，
+设备上这两种文件夹都没有时，App 就用它们。
 `games/totk/ios/tools/push_device_windows.py push-mod` 把 mod 文件夹连同清单复制过去（见 [install.zh-CN.md](install.zh-CN.md#手柄按键图标windows)）。
 
 构建做的事，按顺序：

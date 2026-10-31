@@ -245,6 +245,8 @@ python games/totk/ios/tools/package_ipa_windows.py <目录>/TOTK-runtime.zip --t
 
 工具从 `TOTK-runtime.commit` 读出构建运行时的提交，并在第 3/6 步打印（“source commit: …”）。这个提交写进 `TOTK-package.json`；旧 App 的 `Info.plist` 里有 `TOTKSourceCommit` 这一项时，也写进这一项。`--source-commit <提交>` 可以手动指定提交，优先于这个文件。工作流开始写这个文件之前的 `TOTK-runtime.zip` 里没有它，这时工具记下当前检出的 HEAD 并打印警告，所以这样的运行时要用 `--source-commit` 给出那次运行构建的提交。在测试用的 Windows 电脑上（2026-10-26），第一次带种子打包约 8 分钟，同时写出设备用的种子文件夹（91,304 个文件，几乎都是指向种子的硬链接）。同一种子再打包不到 1 分钟。
 
+**装上就能玩的 IPA。** 默认的 IPA 约 75 MB，不含游戏镜像和着色器，第 6 步把它们复制过去之前，App 只显示“没有游戏数据”。加上 `--game-data app --mods <工作目录>/mods` 就得到含这些内容的 IPA，约 18 GB，可以不经这台电脑安装：镜像分成每份 1 GiB，因为 zsign 无法给 4 GiB 及以上的单个文件做签名封印；另外还有着色器和[耐久和电池预设](#耐久和电池预设windows)的四个档位文件夹。之后复制到设备上的 mod 文件夹优先于 App 里的。这样就不需要第 6 步。
+
 **6. 安装并复制游戏数据：**
 
 ```powershell

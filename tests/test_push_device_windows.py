@@ -249,6 +249,8 @@ class Push(unittest.TestCase):
     def test_the_ipa_says_what_it_carries(self):
         info = app_container.ipa_info(self.ipa(['GameData/shader-seed/seed-manifest.json']))
         self.assertEqual(info['carries'], {'seed': True, 'romfs': False})
+        parts = app_container.ipa_info(self.ipa(['GameData/romfs/romfs.bin.000']))
+        self.assertEqual(parts['carries'], {'seed': False, 'romfs': True})
         self.assertEqual(self.box.installed()['CFBundleIdentifier'], 'a.b')
 
 
