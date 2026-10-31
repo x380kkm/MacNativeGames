@@ -1,7 +1,6 @@
 """games/totk/ios/tools/package_ipa_windows.py and macho.py on a synthetic runtime executable (no game files, no SDK):
 the nine module sections written at their file offsets and checked against the layout and the executable's ios_embed
-table, the Info.plist rules, the runtime archive and the commit it names, the IPA written without zsign and the work
-folder's game data.
+table, the Info.plist rules, the runtime archive and the commit it names, and the work folder's game data.
 
 With TOTK_IOS_RUNTIME=<the ios-runtime workflow's TOTK-runtime.zip>, TOTK_RECOVERED=<recover_ipa.py --out folder, with
 export_ios_windows.py's sections in build/export-ios> and zsign (--zsign's $TOTK_ZSIGN or PATH) the real runtime is
@@ -252,16 +251,6 @@ class Archive(unittest.TestCase):
             (Path(d)/'TOTK').write_bytes(b'\xcf\xfa\xed\xfe')
             with self.assertRaises(package.PackageError):   # a bare executable is not a runtime any more
                 package.unpack_runtime(Path(d)/'TOTK', Path(d)/'bare/TOTK.app')
-
-    def test_the_ipa_written_without_zsign_has_the_modes_of_a_mac_build(self):
-        with tempfile.TemporaryDirectory() as d:
-            app = Path(d)/'stage/Payload/A.app'; (app/'GameData').mkdir(parents=True)
-            (app/'A').write_bytes(b'\xcf\xfa\xed\xfe'); (app/'GameData/x').write_bytes(b'data')
-            package.write_ipa(Path(d)/'stage', Path(d)/'a.ipa', app/'A')
-            with zipfile.ZipFile(Path(d)/'a.ipa') as z:
-                self.assertEqual({i.filename: (i.external_attr >> 16, i.create_system, i.compress_type) for i in z.infolist()},
-                                 {'Payload/A.app/A': (0o100755, 3, 0), 'Payload/A.app/GameData/x': (0o100644, 3, 0)})
-                self.assertEqual(z.read('Payload/A.app/GameData/x'), b'data')
 
 
 class SourceCommit(unittest.TestCase):

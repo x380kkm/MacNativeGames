@@ -253,18 +253,6 @@ def app_info(runtime_info, old_info, identity, with_icons, build):
     return info
 
 
-def write_ipa(root, out, executable):
-    """Payload/ of root as an IPA without zsign, for an app holding a file zsign cannot seal: stored members (zip64 for the
-    17 GB image) with the Unix modes of a Mac build."""
-    out.unlink(missing_ok=True)
-    with zipfile.ZipFile(out, 'w', zipfile.ZIP_STORED, allowZip64=True) as z:
-        for path in sorted(p for p in (root/'Payload').rglob('*') if p.is_file()):
-            info = zipfile.ZipInfo.from_file(path, path.relative_to(root).as_posix())
-            info.create_system, info.external_attr = 3, (0o100755 if path == executable else 0o100644) << 16
-            with open(path, 'rb') as src, z.open(info, 'w', force_zip64=info.file_size >= signing.ZSIGN_FILE_LIMIT) as dst:
-                shutil.copyfileobj(src, dst, 8 << 20)
-
-
 def git_commit():
     try:
         r = subprocess.run(['git', '-C', str(REPO), 'rev-parse', 'HEAD'], capture_output=True, text=True)
@@ -429,15 +417,10 @@ def main():
         report['mod_files'] = bundled_mods(a.mods.resolve(), app/'GameData/mods')
     level = 0 if a.game_data == 'app' else 1   # the 17 GB image is stored, not compressed
     unsigned = out.with_name(stem + '-unsigned.ipa')
-    if signing.large_files(staging):   # the image in the app: written without zsign, and not signed
-        say(f'5/6 {unsigned.name} (not signed: zsign cannot seal the image)')
-        write_ipa(staging, unsigned, app/report['executable'])
-        check = 'not signed; the executable keeps the signature it was linked with, which the written sections void'
-    else:
-        say(f'5/6 {unsigned.name} (ad-hoc signed with TOTK.entitlements)')
-        signing.sign_adhoc(zsign, staging, unsigned, signing.APP_ENTITLEMENTS, level)
-        check = signing.verify(unsigned)
-    report['unsigned'] = dict(path=str(unsigned), sha256=build_app.sha256(unsigned), size=unsigned.stat().st_size, check=check)
+    say(f'5/6 {unsigned.name} (ad-hoc signed with TOTK.entitlements)')
+    signing.sign_adhoc(zsign, staging, unsigned, signing.APP_ENTITLEMENTS, level)
+    report['unsigned'] = dict(path=str(unsigned), sha256=build_app.sha256(unsigned), size=unsigned.stat().st_size,
+                              check=signing.verify(unsigned))
     if ident:
         say(f'6/6 {out.name} (zsign)')
         signing.sign(zsign, ident['openssl'], staging, out, a.p12, ident['password'], a.profile, ident['entitlements'], level)

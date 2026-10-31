@@ -21,8 +21,8 @@ mingw64 openssl has that provider, its MSYS one not).
 
 zsign writes no Unix modes into the IPA on Windows; set_unix_modes gives the entries those of a Mac build (0755 for the
 executable and folders). zsign 1.1.2 on Windows seals a file of 4 GiB or more with the hash of its first size mod 4 GiB
-bytes (large_files), so an app holding one is refused: the 17 GB RomFS image goes to the device's Documents instead
-(push_device_windows.py).
+bytes (large_files), so an app holding one is refused: the 17 GB RomFS image goes to the device's Documents
+(push_device_windows.py) or into the app in parts (package_ipa_windows.py --game-data app).
 
 --verify (and every signing run, on its output) reads the signed executable's code signature: the code directory's page
 hashes over the whole file (so the game sections written in after the link are covered), its identifier and team, the
